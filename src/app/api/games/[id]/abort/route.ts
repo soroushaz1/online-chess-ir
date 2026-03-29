@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 type Params = {
@@ -7,8 +7,20 @@ type Params = {
   }>;
 };
 
-export async function POST(_request: Request, { params }: Params) {
+export async function POST(request: NextRequest, { params }: Params) {
   const { id } = await params;
+
+  const body = await request.json();
+  const { side } = body as {
+    side?: "white" | "black";
+  };
+
+  if (!side) {
+    return NextResponse.json(
+      { ok: false, error: "Missing side" },
+      { status: 400 }
+    );
+  }
 
   const game = await prisma.game.findUnique({
     where: { id },

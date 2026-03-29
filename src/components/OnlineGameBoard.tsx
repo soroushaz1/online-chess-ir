@@ -296,25 +296,31 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
   }
 
   async function handleAbort() {
-    if (!game) return;
+  if (!playerSide || !game) return;
 
-    try {
-      const response = await fetch(`/api/games/${gameId}/abort`, {
-        method: "POST",
-      });
+  try {
+    const response = await fetch(`/api/games/${gameId}/abort`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        side: playerSide,
+      }),
+    });
 
-      const data: ActionResponse = await response.json();
+    const data: ActionResponse = await response.json();
 
-      if (!response.ok || !data.ok || !data.game) {
-        setStatusMessage(data.error ?? "Failed to abort");
-        return;
-      }
+    if (!response.ok || !data.ok || !data.game) {
+      setStatusMessage(data.error ?? "Failed to abort");
+      return;
+    }
 
-      setGame(data.game);
-      setBoardFen(data.game.currentFen);
-      setStatusMessage(getStatusMessage(data.game));
+    setGame(data.game);
+    setBoardFen(data.game.currentFen);
+    setStatusMessage(getStatusMessage(data.game));
     } catch {
-      setStatusMessage("Failed to abort");
+    setStatusMessage("Failed to abort");
     }
   }
 
@@ -433,7 +439,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
 
             <button
               onClick={handleAbort}
-              disabled={game?.status === "finished"}
+              disabled={!playerSide || game?.status === "finished"}
               className="rounded-xl bg-gray-700 px-4 py-2 text-white disabled:opacity-50"
             >
               Abort
