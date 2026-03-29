@@ -1,0 +1,64 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  gamesAsWhite Game[]   @relation("WhitePlayerGames")
+  gamesAsBlack Game[]   @relation("BlackPlayerGames")
+}
+
+model Game {
+  id               String    @id @default(cuid())
+  whitePlayerId    String
+  blackPlayerId    String
+  whiteJoinToken   String    @unique
+  blackJoinToken   String    @unique
+  initialFen       String    @default("start")
+  currentFen       String
+  pgn              String    @default("")
+  status           String    @default("waiting")
+  result           String?
+  rated            Boolean   @default(false)
+  timeControlMs    Int       @default(600000)
+  incrementSeconds Int       @default(0)
+  whiteTimeMs      Int       @default(600000)
+  blackTimeMs      Int       @default(600000)
+  turnStartedAt    DateTime? @default(now())
+
+  whiteConnected   Boolean   @default(false)
+  blackConnected   Boolean   @default(false)
+
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  finishedAt       DateTime?
+
+  whitePlayer User @relation("WhitePlayerGames", fields: [whitePlayerId], references: [id])
+  blackPlayer User @relation("BlackPlayerGames", fields: [blackPlayerId], references: [id])
+  moves       Move[]
+}
+
+model Move {
+  id         String   @id @default(cuid())
+  gameId     String
+  moveNumber Int
+  san        String
+  uci        String
+  fenAfter   String
+  createdAt  DateTime @default(now())
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@index([gameId, moveNumber])
+}
