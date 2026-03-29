@@ -7,15 +7,6 @@ type Params = {
   }>;
 };
 
-function hasSideMoved(
-  moves: { moveNumber: number }[],
-  side: "white" | "black"
-) {
-  return moves.some((move) =>
-    side === "white" ? move.moveNumber % 2 === 1 : move.moveNumber % 2 === 0
-  );
-}
-
 export async function POST(request: NextRequest, { params }: Params) {
   const { id } = await params;
 
@@ -53,25 +44,20 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
-  if (game.status === "finished") {
+  if (game.status !== "active" && game.status !== "waiting") {
     return NextResponse.json(
-      { ok: false, error: "Game already finished" },
+      { ok: false, error: "Game cannot be resigned" },
       { status: 400 }
     );
   }
 
-  if (hasSideMoved(game.moves, side)) {
-    return NextResponse.json(
-      { ok: false, error: "You can only abort before making your first move" },
-      { status: 400 }
-    );
-  }
+  const result = side === "white" ? "0-1" : "1-0";
 
   const updatedGame = await prisma.game.update({
     where: { id },
     data: {
       status: "finished",
-      result: "aborted",
+      result,
       finishedAt: new Date(),
       turnStartedAt: null,
     },

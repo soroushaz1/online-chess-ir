@@ -9,7 +9,7 @@ import { getSocket } from "@/lib/socket";
 type Player = {
   id: string;
   username: string;
-  email: string;
+  phoneNumber: string;
 };
 
 type Move = {
@@ -23,6 +23,12 @@ type Move = {
 
 type Side = "white" | "black";
 
+type CurrentUser = {
+  id: string;
+  username: string;
+  phoneNumber: string;
+};
+
 type Game = {
   id: string;
   currentFen: string;
@@ -32,12 +38,14 @@ type Game = {
   whiteTimeMs: number;
   blackTimeMs: number;
   turnStartedAt: string | null;
-  whiteJoinToken: string;
-  blackJoinToken: string;
+  whiteJoinToken: string | null;
+  blackJoinToken: string | null;
   whiteConnected: boolean;
   blackConnected: boolean;
-  whitePlayer: Player;
-  blackPlayer: Player;
+  whitePlayerId: string | null;
+  blackPlayerId: string | null;
+  whitePlayer: Player | null;
+  blackPlayer: Player | null;
   moves: Move[];
 };
 
@@ -53,9 +61,13 @@ type ActionResponse = {
   game?: Game;
 };
 
+type MeResponse = {
+  ok: boolean;
+  user: CurrentUser | null;
+};
+
 function getTurnFromFen(fen: string): Side {
-  const parts = fen.split(" ");
-  return parts[1] === "b" ? "black" : "white";
+  return fen.split(" ")[1] === "b" ? "black" : "white";
 }
 
 function getTurnTextFromFen(fen: string) {
@@ -111,10 +123,7 @@ function getLiveClockMs(game: Game, side: Side) {
   }
 
   const turn = getTurnFromFen(game.currentFen);
-
-  if (turn !== side) {
-    return base;
-  }
+  if (turn !== side) return base;
 
   const elapsed = Date.now() - new Date(game.turnStartedAt).getTime();
   return Math.max(0, base - elapsed);
@@ -132,10 +141,17 @@ function getStatusMessage(game: Game) {
   return `${getTurnTextFromFen(game.currentFen)} to move`;
 }
 
+function hasSideMoved(moves: Move[], side: Side) {
+  return moves.some((move) =>
+    side === "white" ? move.moveNumber % 2 === 1 : move.moveNumber % 2 === 0
+  );
+}
+
 export default function OnlineGameBoard({ gameId }: { gameId: string }) {
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
 
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [game, setGame] = useState<Game | null>(null);
   const [boardFen, setBoardFen] = useState("start");
   const [statusMessage, setStatusMessage] = useState("Loading game...");
@@ -143,11 +159,11 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
   const [, setTick] = useState(0);
 
   const playerSide = useMemo<Side | null>(() => {
-    if (!game || !token) return null;
-    if (token === game.whiteJoinToken) return "white";
-    if (token === game.blackJoinToken) return "black";
+    if (!game || !currentUser) return null;
+    if (game.whitePlayerId === currentUser.id) return "white";
+    if (game.blackPlayerId === currentUser.id) return "black";
     return null;
-  }, [game, token]);
+  }, [game, currentUser]);
 
   async function loadGame() {
     try {
@@ -167,6 +183,38 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       setStatusMessage(getStatusMessage(data.game));
     } catch {
       setStatusMessage("Failed to load game");
+    }
+  }
+
+  async function tryJoinGame(activeUser: CurrentUser) {
+    if (!token) return;
+
+    try {
+      const response = await fetch(`/api/games/${gameId}/join`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ token }),
+      });
+
+      const data: ActionResponse = await response.json();
+
+      console.log("join response", response.status, data, "user", activeUser);
+
+      if (!response.ok || !data.ok || !data.game) {
+        setStatusMessage(data.error ?? "Failed to join game");
+        return;
+      }
+
+      setGame(data.game);
+      setBoardFen(data.game.currentFen);
+      setStatusMessage(getStatusMessage(data.game));
+
+      await loadGame();
+    } catch (error) {
+      console.error("join failed", error);
+      setStatusMessage("Failed to join game");
     }
   }
 
@@ -190,8 +238,26 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
   }
 
   useEffect(() => {
-    loadGame();
-  }, [gameId]);
+    async function initializePage() {
+      try {
+        const meResponse = await fetch("/api/auth/me", { cache: "no-store" });
+        const meData: MeResponse = await meResponse.json();
+
+        setCurrentUser(meData.user);
+
+        if (meData.user && token) {
+          await tryJoinGame(meData.user);
+        }
+
+        await loadGame();
+      } catch (error) {
+        console.error("initializePage failed", error);
+        setStatusMessage("Failed to initialize game");
+      }
+    }
+
+    void initializePage();
+  }, [gameId, token]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -296,31 +362,31 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
   }
 
   async function handleAbort() {
-  if (!playerSide || !game) return;
+    if (!playerSide || !game) return;
 
-  try {
-    const response = await fetch(`/api/games/${gameId}/abort`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        side: playerSide,
-      }),
-    });
+    try {
+      const response = await fetch(`/api/games/${gameId}/abort`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          side: playerSide,
+        }),
+      });
 
-    const data: ActionResponse = await response.json();
+      const data: ActionResponse = await response.json();
 
-    if (!response.ok || !data.ok || !data.game) {
-      setStatusMessage(data.error ?? "Failed to abort");
-      return;
-    }
+      if (!response.ok || !data.ok || !data.game) {
+        setStatusMessage(data.error ?? "Failed to abort");
+        return;
+      }
 
-    setGame(data.game);
-    setBoardFen(data.game.currentFen);
-    setStatusMessage(getStatusMessage(data.game));
+      setGame(data.game);
+      setBoardFen(data.game.currentFen);
+      setStatusMessage(getStatusMessage(data.game));
     } catch {
-    setStatusMessage("Failed to abort");
+      setStatusMessage("Failed to abort");
     }
   }
 
@@ -357,11 +423,18 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     }
 
     const chess = new Chess(game.currentFen);
-    const move = chess.move({
-      from: sourceSquare,
-      to: targetSquare,
-      promotion: "q",
-    });
+
+    let move;
+    try {
+      move = chess.move({
+        from: sourceSquare,
+        to: targetSquare,
+        promotion: "q",
+      });
+    } catch {
+      setStatusMessage("Illegal move");
+      return false;
+    }
 
     if (!move) {
       setStatusMessage("Illegal move");
@@ -393,16 +466,20 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
 
           <div className="mt-4 space-y-2 text-sm text-gray-700">
             <p>
+              <span className="font-semibold">Logged in as:</span>{" "}
+              {currentUser?.username ?? "Guest"}
+            </p>
+            <p>
               <span className="font-semibold">You are:</span>{" "}
               {getSideLabel(playerSide)}
             </p>
             <p>
               <span className="font-semibold">White:</span>{" "}
-              {game?.whitePlayer.username ?? "..."}
+              {game?.whitePlayer?.username ?? "Waiting..."}
             </p>
             <p>
               <span className="font-semibold">Black:</span>{" "}
-              {game?.blackPlayer.username ?? "..."}
+              {game?.blackPlayer?.username ?? "Waiting..."}
             </p>
             <p>
               <span className="font-semibold">White connected:</span>{" "}
@@ -439,7 +516,12 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
 
             <button
               onClick={handleAbort}
-              disabled={!playerSide || game?.status === "finished"}
+              disabled={
+                !playerSide ||
+                game?.status === "finished" ||
+                (!!game?.whitePlayerId && !!game?.blackPlayerId) ||
+                (game ? hasSideMoved(game.moves, playerSide) : false)
+              }
               className="rounded-xl bg-gray-700 px-4 py-2 text-white disabled:opacity-50"
             >
               Abort
@@ -447,10 +529,10 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
           </div>
 
           <div className="mt-4 rounded-xl bg-gray-100 p-3 text-sm">
-            <p className="font-semibold">How access works</p>
+            <p className="font-semibold">Seat assignment</p>
             <p className="mt-2">
-              White and Black sides are determined by the private token in the
-              URL. Opening the game without a token makes you a spectator.
+              The creator gets a random color. The invite link lets another
+              logged-in player claim the open seat.
             </p>
           </div>
 

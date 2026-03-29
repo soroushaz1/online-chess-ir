@@ -25,6 +25,17 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   const game = await prisma.game.findUnique({
     where: { id },
+    include: {
+      whitePlayer: {
+        select: { id: true, username: true, phoneNumber: true },
+      },
+      blackPlayer: {
+        select: { id: true, username: true, phoneNumber: true },
+      },
+      moves: {
+        orderBy: { moveNumber: "asc" },
+      },
+    },
   });
 
   if (!game) {
@@ -39,8 +50,13 @@ export async function POST(request: NextRequest, { params }: Params) {
   const nextBlackConnected =
     side === "black" ? connected : game.blackConnected;
 
+  const bothSeatsFilled = !!game.whitePlayerId && !!game.blackPlayerId;
+
   const shouldActivate =
-    game.status === "waiting" && nextWhiteConnected && nextBlackConnected;
+    game.status === "waiting" &&
+    bothSeatsFilled &&
+    nextWhiteConnected &&
+    nextBlackConnected;
 
   const updatedGame = await prisma.game.update({
     where: { id },
@@ -52,10 +68,10 @@ export async function POST(request: NextRequest, { params }: Params) {
     },
     include: {
       whitePlayer: {
-        select: { id: true, username: true, email: true },
+        select: { id: true, username: true, phoneNumber: true },
       },
       blackPlayer: {
-        select: { id: true, username: true, email: true },
+        select: { id: true, username: true, phoneNumber: true },
       },
       moves: {
         orderBy: { moveNumber: "asc" },

@@ -8,23 +8,53 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  username     String   @unique
-  email        String   @unique
-  passwordHash String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id              String    @id @default(cuid())
+  username        String    @unique
+  phoneNumber     String    @unique
+  phoneVerifiedAt DateTime?
+  email           String?   @unique
+  passwordHash    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  gamesAsWhite Game[]   @relation("WhitePlayerGames")
-  gamesAsBlack Game[]   @relation("BlackPlayerGames")
+  gamesAsWhite Game[]    @relation("WhitePlayerGames")
+  gamesAsBlack Game[]    @relation("BlackPlayerGames")
+  sessions     Session[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model OtpCode {
+  id           String   @id @default(cuid())
+  phoneNumber  String
+  username     String?
+  codeHash     String
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  attemptCount Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  @@index([phoneNumber])
+  @@index([expiresAt])
 }
 
 model Game {
   id               String    @id @default(cuid())
-  whitePlayerId    String
-  blackPlayerId    String
-  whiteJoinToken   String    @unique
-  blackJoinToken   String    @unique
+  whitePlayerId    String?
+  blackPlayerId    String?
+  whiteJoinToken   String?   @unique
+  blackJoinToken   String?   @unique
   initialFen       String    @default("start")
   currentFen       String
   pgn              String    @default("")
@@ -36,16 +66,14 @@ model Game {
   whiteTimeMs      Int       @default(600000)
   blackTimeMs      Int       @default(600000)
   turnStartedAt    DateTime? @default(now())
-
   whiteConnected   Boolean   @default(false)
   blackConnected   Boolean   @default(false)
-
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   finishedAt       DateTime?
 
-  whitePlayer User @relation("WhitePlayerGames", fields: [whitePlayerId], references: [id])
-  blackPlayer User @relation("BlackPlayerGames", fields: [blackPlayerId], references: [id])
+  whitePlayer User? @relation("WhitePlayerGames", fields: [whitePlayerId], references: [id])
+  blackPlayer User? @relation("BlackPlayerGames", fields: [blackPlayerId], references: [id])
   moves       Move[]
 }
 

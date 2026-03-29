@@ -13,22 +13,26 @@ const prisma = new PrismaClient({ adapter });
 
 async function main() {
   const user1 = await prisma.user.upsert({
-    where: { email: "alice@example.com" },
+    where: { phoneNumber: "+989121111111" },
     update: {},
     create: {
       username: "alice",
+      phoneNumber: "+989121111111",
+      phoneVerifiedAt: new Date(),
       email: "alice@example.com",
-      passwordHash: "dev-only-password-hash",
+      passwordHash: null,
     },
   });
 
   const user2 = await prisma.user.upsert({
-    where: { email: "bob@example.com" },
+    where: { phoneNumber: "+989122222222" },
     update: {},
     create: {
       username: "bob",
+      phoneNumber: "+989122222222",
+      phoneVerifiedAt: new Date(),
       email: "bob@example.com",
-      passwordHash: "dev-only-password-hash",
+      passwordHash: null,
     },
   });
 
