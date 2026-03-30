@@ -18,6 +18,11 @@ export function normalizeIranPhoneNumber(input: string) {
   throw new Error("Phone number must be a valid Iranian mobile number");
 }
 
+export function toIranMobile09Format(input: string) {
+  const normalized = normalizeIranPhoneNumber(input);
+  return `0${normalized.slice(3)}`;
+}
+
 export function generateOtpCode() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
