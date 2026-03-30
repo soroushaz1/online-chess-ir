@@ -5,6 +5,7 @@ import {
   hashOtpCode,
   normalizeIranPhoneNumber,
 } from "@/lib/phone-auth";
+import { isGhasedakConfigured, sendOtpViaGhasedak } from "@/lib/ghasedak";
 
 export async function POST(request: NextRequest) {
   try {
@@ -29,10 +30,7 @@ export async function POST(request: NextRequest) {
 
     if (!existingUser && !username) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "Username is required for a new account",
-        },
+        { ok: false, error: "Username is required for a new account" },
         { status: 400 }
       );
     }
@@ -50,11 +48,28 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const latestOtp = await prisma.otpCode.findFirst({
+      where: {
+        phoneNumber: normalizedPhone,
+        consumedAt: null,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    if (latestOtp && Date.now() - latestOtp.createdAt.getTime() < 45_000) {
+      return NextResponse.json(
+        { ok: false, error: "Please wait before requesting another code" },
+        { status: 429 }
+      );
+    }
+
     const code = generateOtpCode();
     const codeHash = hashOtpCode(code);
     const expiresAt = new Date(Date.now() + 1000 * 60 * 3);
 
-    await prisma.otpCode.create({
+    const otp = await prisma.otpCode.create({
       data: {
         phoneNumber: normalizedPhone,
         username: existingUser ? null : username ?? null,
@@ -63,20 +78,31 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // TODO: Replace this with your real SMS provider call.
-    // For development, return the code in the response.
+    try {
+      if (isGhasedakConfigured()) {
+        await sendOtpViaGhasedak({
+          phoneNumber: normalizedPhone,
+          code,
+          clientReferenceId: `otp-${otp.id}`,
+        });
+      } else if (process.env.NODE_ENV === "production") {
+        throw new Error("Ghasedak is not configured");
+      }
+    } catch (error) {
+      await prisma.otpCode.delete({
+        where: { id: otp.id },
+      }).catch(() => {});
+
+      throw error;
+    }
+
     return NextResponse.json({
       ok: true,
       message: "Verification code sent",
-      ...(process.env.NODE_ENV !== "production" ? { devCode: code } : {}),
+      ...(process.env.AUTH_DEBUG_SHOW_OTP === "true" ? { devCode: code } : {}),
     });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to send code";
-
-    return NextResponse.json(
-      { ok: false, error: message },
-      { status: 400 }
-    );
+    const message = error instanceof Error ? error.message : "Failed to send code";
+    return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
 }
