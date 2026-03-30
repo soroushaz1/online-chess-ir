@@ -7,11 +7,28 @@ type CurrentUser = {
   id: string;
   username: string;
   phoneNumber: string;
+  rating: number;
 };
 
 type MeResponse = {
   ok: boolean;
   user: CurrentUser | null;
+};
+
+type MatchmakingStatusResponse = {
+  ok: boolean;
+  loggedIn: boolean;
+  status: "idle" | "searching";
+  gameId: string | null;
+  hasActiveGame: boolean;
+  activeGameId: string | null;
+};
+
+type MatchmakingJoinResponse = {
+  ok: boolean;
+  error?: string;
+  status?: "searching" | "matched";
+  gameId?: string;
 };
 
 type CreateGameResponse = {
@@ -32,7 +49,9 @@ export default function HomePage() {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState("");
+  const [activeGameId, setActiveGameId] = useState<string | null>(null);
   const [gameInfo, setGameInfo] = useState<null | {
     gameId: string;
     creatorSide: "white" | "black";
@@ -63,6 +82,38 @@ export default function HomePage() {
     void loadUser();
   }, []);
 
+  useEffect(() => {
+    if (!user) return;
+
+    async function checkStatus() {
+      const response = await fetch("/api/matchmaking/status", {
+        cache: "no-store",
+      });
+      const data: MatchmakingStatusResponse = await response.json();
+
+      console.log("matchmaking status", data);
+
+      if (data.hasActiveGame && data.activeGameId) {
+        setActiveGameId(data.activeGameId);
+      } else {
+        setActiveGameId(null);
+      }
+
+      if (data.status === "searching") {
+        setIsSearching(true);
+      } else {
+        setIsSearching(false);
+      }
+    }
+
+    void checkStatus();
+    const interval = window.setInterval(checkStatus, 2000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [user]);
+
   async function handleCreateGame() {
     try {
       setIsCreating(true);
@@ -77,7 +128,13 @@ export default function HomePage() {
 
       console.log("create game response", data);
 
-      if (!response.ok || !data.ok || !data.links || !data.creatorSide || !data.game) {
+      if (
+        !response.ok ||
+        !data.ok ||
+        !data.links ||
+        !data.creatorSide ||
+        !data.game
+      ) {
         setError(data.error ?? "Failed to create game");
         return;
       }
@@ -97,6 +154,47 @@ export default function HomePage() {
     }
   }
 
+  async function handlePlayRated() {
+    try {
+      setError("");
+
+      const response = await fetch("/api/matchmaking/join", {
+        method: "POST",
+      });
+
+      const data: MatchmakingJoinResponse = await response.json();
+
+      console.log("matchmaking join response", data);
+
+      if (!response.ok || !data.ok) {
+        setError(data.error ?? "Failed to join matchmaking");
+        return;
+      }
+
+      if (data.status === "matched" && data.gameId) {
+        window.location.href = `/game/${data.gameId}`;
+        return;
+      }
+
+      setIsSearching(true);
+    } catch (err) {
+      console.error("failed to join matchmaking", err);
+      setError("Failed to join matchmaking");
+    }
+  }
+
+  async function handleCancelSearch() {
+    try {
+      await fetch("/api/matchmaking/leave", {
+        method: "POST",
+      });
+      setIsSearching(false);
+    } catch (err) {
+      console.error("failed to leave matchmaking", err);
+      setError("Failed to leave matchmaking");
+    }
+  }
+
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col items-center justify-center gap-6 p-6">
       <div className="w-full rounded-2xl border bg-white p-8 shadow-sm">
@@ -113,14 +211,34 @@ export default function HomePage() {
               <p className="text-sm text-gray-700">
                 Logged in as <span className="font-semibold">{user.username}</span>
               </p>
+              <p className="text-sm text-gray-700">
+                Rating: <span className="font-semibold">{user.rating}</span>
+              </p>
 
               <div className="flex flex-wrap gap-3">
                 <button
-                  onClick={handleCreateGame}
-                  disabled={isCreating}
+                  onClick={handlePlayRated}
+                  disabled={isSearching || !!activeGameId}
                   className="rounded-xl bg-black px-6 py-3 text-white disabled:opacity-50"
                 >
-                  {isCreating ? "Creating..." : "Create Game"}
+                  {isSearching ? "Searching..." : "Play Rated 10+0"}
+                </button>
+
+                {isSearching ? (
+                  <button
+                    onClick={handleCancelSearch}
+                    className="rounded-xl border px-6 py-3"
+                  >
+                    Cancel Search
+                  </button>
+                ) : null}
+
+                <button
+                  onClick={handleCreateGame}
+                  disabled={isCreating || isSearching || !!activeGameId}
+                  className="rounded-xl border px-6 py-3 disabled:opacity-50"
+                >
+                  {isCreating ? "Creating..." : "Create Private Game"}
                 </button>
 
                 <form action="/api/auth/logout" method="post">
@@ -142,6 +260,18 @@ export default function HomePage() {
 
         {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}
 
+        {activeGameId ? (
+          <div className="mt-6 rounded-xl bg-gray-100 p-4 text-sm">
+            <p className="font-semibold">You already have an ongoing game</p>
+            <a
+              className="mt-2 inline-block break-all text-blue-600 underline"
+              href={`/game/${activeGameId}`}
+            >
+              Resume current game
+            </a>
+          </div>
+        ) : null}
+
         {gameInfo ? (
           <div className="mt-6 rounded-2xl bg-gray-100 p-4 text-sm">
             <p className="font-semibold">
@@ -157,7 +287,7 @@ export default function HomePage() {
                 <p className="font-medium">Your game link</p>
                 <a
                   className="break-all text-blue-600 underline"
-                  href={gameInfo.yourGame}
+                  href={origin + gameInfo.yourGame}
                 >
                   {origin + gameInfo.yourGame}
                 </a>
@@ -167,7 +297,7 @@ export default function HomePage() {
                 <p className="font-medium">Invite link for opponent</p>
                 <a
                   className="break-all text-blue-600 underline"
-                  href={gameInfo.invite}
+                  href={origin + gameInfo.invite}
                 >
                   {origin + gameInfo.invite}
                 </a>
@@ -177,7 +307,7 @@ export default function HomePage() {
                 <p className="font-medium">Spectator link</p>
                 <a
                   className="break-all text-blue-600 underline"
-                  href={gameInfo.spectator}
+                  href={origin + gameInfo.spectator}
                 >
                   {origin + gameInfo.spectator}
                 </a>

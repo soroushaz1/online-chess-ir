@@ -458,7 +458,11 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
 
       <div className="grid gap-4 md:grid-cols-[1fr_320px]">
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <Chessboard position={boardFen} onPieceDrop={onPieceDrop} />
+          <Chessboard
+            position={boardFen}
+            onPieceDrop={onPieceDrop}
+            boardOrientation={playerSide ?? "white"}
+          />
         </div>
 
         <div className="rounded-2xl border bg-white p-4 shadow-sm">

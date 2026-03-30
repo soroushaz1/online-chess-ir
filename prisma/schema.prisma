@@ -14,12 +14,14 @@ model User {
   phoneVerifiedAt DateTime?
   email           String?   @unique
   passwordHash    String?
+  rating          Int       @default(1200)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
   gamesAsWhite Game[]    @relation("WhitePlayerGames")
   gamesAsBlack Game[]    @relation("BlackPlayerGames")
   sessions     Session[]
+  queueEntries MatchmakingQueue[]
 }
 
 model Session {
@@ -89,4 +91,16 @@ model Move {
   game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
 
   @@index([gameId, moveNumber])
+}
+
+model MatchmakingQueue {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  ratingSnapshot Int
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@index([ratingSnapshot])
 }
