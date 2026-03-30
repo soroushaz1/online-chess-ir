@@ -1,15 +1,11 @@
-import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { isGhasedakConfigured, sendOtpViaGhasedak } from "@/lib/ghasedak";
 import {
   generateOtpCode,
   hashOtpCode,
   normalizeIranPhoneNumber,
 } from "@/lib/phone-auth";
-
-const OTP_TTL_MS = 1000 * 60 * 3;
-const OTP_RESEND_COOLDOWN_MS = 1000 * 45;
+import { isGhasedakConfigured, sendOtpViaGhasedak } from "@/lib/ghasedak";
 
 export async function POST(request: NextRequest) {
   try {
@@ -27,25 +23,21 @@ export async function POST(request: NextRequest) {
     }
 
     const normalizedPhone = normalizeIranPhoneNumber(phoneNumber);
-    const cleanedUsername = username?.trim();
 
     const existingUser = await prisma.user.findUnique({
       where: { phoneNumber: normalizedPhone },
     });
 
-    if (!existingUser && !cleanedUsername) {
+    if (!existingUser && !username) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "Username is required for a new account",
-        },
+        { ok: false, error: "Username is required for a new account" },
         { status: 400 }
       );
     }
 
-    if (cleanedUsername) {
+    if (username) {
       const takenUsername = await prisma.user.findUnique({
-        where: { username: cleanedUsername },
+        where: { username },
       });
 
       if (takenUsername && takenUsername.phoneNumber !== normalizedPhone) {
@@ -56,77 +48,61 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const recentOtp = await prisma.otpCode.findFirst({
+    const latestOtp = await prisma.otpCode.findFirst({
       where: {
         phoneNumber: normalizedPhone,
         consumedAt: null,
-        createdAt: {
-          gte: new Date(Date.now() - OTP_RESEND_COOLDOWN_MS),
-        },
       },
       orderBy: {
         createdAt: "desc",
       },
     });
 
-    if (recentOtp) {
+    if (latestOtp && Date.now() - latestOtp.createdAt.getTime() < 45_000) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "Please wait a little before requesting another code",
-        },
+        { ok: false, error: "Please wait before requesting another code" },
         { status: 429 }
       );
     }
 
     const code = generateOtpCode();
     const codeHash = hashOtpCode(code);
-    const expiresAt = new Date(Date.now() + OTP_TTL_MS);
-    const clientReferenceId = crypto.randomUUID();
-    const shouldUseDebugCode = process.env.AUTH_DEBUG_SHOW_OTP === "true";
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 3);
 
-    if (isGhasedakConfigured()) {
-      await sendOtpViaGhasedak({
+    const otp = await prisma.otpCode.create({
+      data: {
         phoneNumber: normalizedPhone,
-        code,
-        clientReferenceId,
-      });
-    } else if (process.env.NODE_ENV === "production") {
-      throw new Error("Ghasedak is not configured");
-    }
+        username: existingUser ? null : username ?? null,
+        codeHash,
+        expiresAt,
+      },
+    });
 
-    await prisma.$transaction([
-      prisma.otpCode.updateMany({
-        where: {
+    try {
+      if (isGhasedakConfigured()) {
+        await sendOtpViaGhasedak({
           phoneNumber: normalizedPhone,
-          consumedAt: null,
-        },
-        data: {
-          consumedAt: new Date(),
-        },
-      }),
-      prisma.otpCode.create({
-        data: {
-          phoneNumber: normalizedPhone,
-          username: existingUser ? null : cleanedUsername ?? null,
-          codeHash,
-          expiresAt,
-        },
-      }),
-    ]);
+          code,
+          clientReferenceId: `otp-${otp.id}`,
+        });
+      } else if (process.env.NODE_ENV === "production") {
+        throw new Error("Ghasedak is not configured");
+      }
+    } catch (error) {
+      await prisma.otpCode.delete({
+        where: { id: otp.id },
+      }).catch(() => {});
+
+      throw error;
+    }
 
     return NextResponse.json({
       ok: true,
       message: "Verification code sent",
-      ...(shouldUseDebugCode ? { devCode: code } : {}),
+      ...(process.env.AUTH_DEBUG_SHOW_OTP === "true" ? { devCode: code } : {}),
     });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to send code";
-
-    return NextResponse.json(
-      { ok: false, error: message },
-      { status: 400 }
-    );
+    const message = error instanceof Error ? error.message : "Failed to send code";
+    return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
 }
