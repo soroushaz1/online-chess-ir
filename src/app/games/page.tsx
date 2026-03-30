@@ -25,31 +25,42 @@ export default async function GamesPage() {
         {games.length === 0 ? (
           <p>No games yet.</p>
         ) : (
-          games.map((game) => (
-            <div key={game.id} className="rounded-2xl border bg-white p-4 shadow-sm">
-              <p className="font-semibold">
-                {game.whitePlayer.username} vs {game.blackPlayer.username}
-              </p>
-              <p className="mt-1 text-sm text-gray-600">
-                Status: {game.status} | Result: {game.result ?? "in progress"}
-              </p>
-              <p className="mt-1 text-sm text-gray-600">
-                Moves: {game.moves.length}
-              </p>
-              <p className="mt-1 text-xs text-gray-500 break-all">
-                Game ID: {game.id}
-              </p>
+          games.map((game) => {
+            const whiteName = game.whitePlayer?.username ?? "Waiting...";
+            const blackName = game.blackPlayer?.username ?? "Waiting...";
 
-              <div className="mt-3">
-                <Link
-                  className="text-blue-600 underline"
-                  href={`/game/${game.id}`}
-                >
-                  Open as spectator
-                </Link>
+            return (
+              <div
+                key={game.id}
+                className="rounded-2xl border bg-white p-4 shadow-sm"
+              >
+                <p className="font-semibold">
+                  {whiteName} vs {blackName}
+                </p>
+
+                <p className="mt-1 text-sm text-gray-600">
+                  Status: {game.status} | Result: {game.result ?? "in progress"}
+                </p>
+
+                <p className="mt-1 text-sm text-gray-600">
+                  Rated: {game.rated ? "Yes" : "No"} | Moves: {game.moves.length}
+                </p>
+
+                <p className="mt-1 break-all text-xs text-gray-500">
+                  Game ID: {game.id}
+                </p>
+
+                <div className="mt-3">
+                  <Link
+                    className="text-blue-600 underline"
+                    href={`/game/${game.id}`}
+                  >
+                    Open as spectator
+                  </Link>
+                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </main>

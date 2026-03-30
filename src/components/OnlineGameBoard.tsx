@@ -523,7 +523,6 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
               disabled={
                 !playerSide ||
                 game?.status === "finished" ||
-                (!!game?.whitePlayerId && !!game?.blackPlayerId) ||
                 (game ? hasSideMoved(game.moves, playerSide) : false)
               }
               className="rounded-xl bg-gray-700 px-4 py-2 text-white disabled:opacity-50"

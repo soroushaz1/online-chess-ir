@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type CurrentUser = {
   id: string;
@@ -60,6 +60,8 @@ export default function HomePage() {
     spectator: string;
   }>(null);
 
+  const wasSearchingRef = useRef(false);
+
   const origin =
     typeof window !== "undefined" ? window.location.origin : "";
 
@@ -95,12 +97,19 @@ export default function HomePage() {
 
       if (data.hasActiveGame && data.activeGameId) {
         setActiveGameId(data.activeGameId);
+
+        // Auto-redirect only if this user was actively searching
+        if (wasSearchingRef.current) {
+          window.location.href = `/game/${data.activeGameId}`;
+          return;
+        }
       } else {
         setActiveGameId(null);
       }
 
       if (data.status === "searching") {
         setIsSearching(true);
+        wasSearchingRef.current = true;
       } else {
         setIsSearching(false);
       }
@@ -157,6 +166,8 @@ export default function HomePage() {
   async function handlePlayRated() {
     try {
       setError("");
+      setGameInfo(null);
+      wasSearchingRef.current = true;
 
       const response = await fetch("/api/matchmaking/join", {
         method: "POST",
@@ -167,6 +178,7 @@ export default function HomePage() {
       console.log("matchmaking join response", data);
 
       if (!response.ok || !data.ok) {
+        wasSearchingRef.current = false;
         setError(data.error ?? "Failed to join matchmaking");
         return;
       }
@@ -178,6 +190,7 @@ export default function HomePage() {
 
       setIsSearching(true);
     } catch (err) {
+      wasSearchingRef.current = false;
       console.error("failed to join matchmaking", err);
       setError("Failed to join matchmaking");
     }
@@ -189,6 +202,7 @@ export default function HomePage() {
         method: "POST",
       });
       setIsSearching(false);
+      wasSearchingRef.current = false;
     } catch (err) {
       console.error("failed to leave matchmaking", err);
       setError("Failed to leave matchmaking");
@@ -260,7 +274,7 @@ export default function HomePage() {
 
         {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}
 
-        {activeGameId ? (
+        {activeGameId && !isSearching ? (
           <div className="mt-6 rounded-xl bg-gray-100 p-4 text-sm">
             <p className="font-semibold">You already have an ongoing game</p>
             <a
