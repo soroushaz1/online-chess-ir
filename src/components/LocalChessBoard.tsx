@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
-import type { ChessboardOptions } from "react-chessboard";
 
 export default function LocalChessBoard() {
   const chess = useMemo(() => new Chess(), []);
@@ -29,25 +28,6 @@ export default function LocalChessBoard() {
     setStatus(`${chess.turn() === "w" ? "White" : "Black"} to move`);
   }
 
-  const chessboardOptions: ChessboardOptions = {
-    position: fen,
-    onPieceDrop: ({ sourceSquare, targetSquare }) => {
-      if (!targetSquare) return false;
-
-      const move = chess.move({
-        from: sourceSquare,
-        to: targetSquare,
-        promotion: "q",
-      });
-
-      if (!move) return false;
-
-      setFen(chess.fen());
-      updateStatus();
-      return true;
-    },
-  };
-
   function resetGame() {
     chess.reset();
     setFen(chess.fen());
@@ -63,7 +43,24 @@ export default function LocalChessBoard() {
 
       <div className="grid gap-4 md:grid-cols-[1fr_280px]">
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <Chessboard options={chessboardOptions} />
+          <Chessboard
+            id="LocalBoard"
+            position={fen}
+            onPieceDrop={(sourceSquare, targetSquare) => {
+              const move = chess.move({
+                from: sourceSquare,
+                to: targetSquare,
+                promotion: "q",
+              });
+
+              if (!move) return false;
+
+              setFen(chess.fen());
+              updateStatus();
+              return true;
+            }}
+            autoPromoteToQueen
+          />
         </div>
 
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
