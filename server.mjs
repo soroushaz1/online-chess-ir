@@ -3,8 +3,8 @@ import next from "next";
 import { Server } from "socket.io";
 
 const dev = process.env.NODE_ENV !== "production";
-const hostname = "localhost";
-const port = 3000;
+const hostname = process.env.HOST || "0.0.0.0";
+const port = Number(process.env.PORT || 3000);
 
 const app = next({ dev, hostname, port });
 const handler = app.getRequestHandler();
@@ -15,7 +15,7 @@ const httpServer = createServer(handler);
 
 const io = new Server(httpServer, {
   cors: {
-    origin: "*",
+    origin: process.env.APP_ORIGIN || true,
   },
 });
 
@@ -31,6 +31,6 @@ io.on("connection", (socket) => {
 
 globalThis.io = io;
 
-httpServer.listen(port, () => {
+httpServer.listen(port, hostname, () => {
   console.log(`> Ready on http://${hostname}:${port}`);
 });
