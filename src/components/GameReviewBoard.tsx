@@ -9,7 +9,6 @@ type Move = {
   san: string;
   uci: string;
   fenAfter: string;
-//   createdAt: Date;
 };
 
 type GameReview = {
@@ -17,6 +16,7 @@ type GameReview = {
   initialFen: string;
   result: string | null;
   status: string;
+  pgn: string | null;
   whitePlayer: {
     username: string;
   } | null;
@@ -52,6 +52,9 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
     return rows;
   }, [game.moves]);
 
+  const whiteName = game.whitePlayer?.username ?? "White";
+  const blackName = game.blackPlayer?.username ?? "Black";
+
   function goToStart() {
     setCurrentPly(0);
   }
@@ -68,17 +71,66 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
     setCurrentPly(game.moves.length);
   }
 
+  async function handleCopyPgn() {
+    if (!game.pgn) return;
+
+    try {
+      await navigator.clipboard.writeText(game.pgn);
+      alert("PGN copied");
+    } catch (error) {
+      console.error("Failed to copy PGN", error);
+      alert("Failed to copy PGN");
+    }
+  }
+
+  function handleDownloadPgn() {
+    if (!game.pgn) return;
+
+    const safeWhite = whiteName.replace(/[^a-z0-9_-]+/gi, "-");
+    const safeBlack = blackName.replace(/[^a-z0-9_-]+/gi, "-");
+    const filename = `${safeWhite}-vs-${safeBlack}-${game.id}.pgn`;
+
+    const blob = new Blob([game.pgn], { type: "application/x-chess-pgn" });
+    const url = URL.createObjectURL(blob);
+
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4">
       <div className="rounded-2xl border bg-white p-4 shadow-sm">
         <h1 className="text-2xl font-bold">Game Review</h1>
         <p className="mt-1 text-sm text-gray-600">
-          {game.whitePlayer?.username ?? "White"} vs{" "}
-          {game.blackPlayer?.username ?? "Black"}
+          {whiteName} vs {blackName}
         </p>
         <p className="mt-2 text-sm text-gray-700">
           Result: {game.result ?? "Unknown"}
         </p>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button
+            onClick={handleCopyPgn}
+            disabled={!game.pgn}
+            className="rounded-xl border px-4 py-2 disabled:opacity-50"
+          >
+            Copy PGN
+          </button>
+
+          <button
+            onClick={handleDownloadPgn}
+            disabled={!game.pgn}
+            className="rounded-xl border px-4 py-2 disabled:opacity-50"
+          >
+            Download PGN
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-[1fr_340px]">
@@ -122,7 +174,9 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
           <div className="mt-4 rounded-xl bg-gray-100 p-3 text-sm text-gray-700">
             <p>
               <span className="font-semibold">Move:</span>{" "}
-              {currentPly === 0 ? "Start position" : `${currentPly}. ${currentMove?.san}`}
+              {currentPly === 0
+                ? "Start position"
+                : `${currentPly}. ${currentMove?.san}`}
             </p>
             <p className="mt-1 break-all">
               <span className="font-semibold">FEN:</span> {currentFen}
@@ -184,6 +238,15 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
               </div>
             )}
           </div>
+
+          {game.pgn ? (
+            <div className="mt-4 rounded-xl bg-gray-100 p-3">
+              <p className="mb-2 text-sm font-semibold text-gray-700">PGN</p>
+              <pre className="whitespace-pre-wrap break-words text-xs text-gray-700">
+                {game.pgn}
+              </pre>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

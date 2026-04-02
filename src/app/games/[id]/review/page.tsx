@@ -29,6 +29,7 @@ export default async function ReviewPage({ params }: PageProps) {
       currentFen: true,
       status: true,
       result: true,
+      pgn: true,
       whitePlayerId: true,
       blackPlayerId: true,
       whitePlayer: {
@@ -51,7 +52,6 @@ export default async function ReviewPage({ params }: PageProps) {
           san: true,
           uci: true,
           fenAfter: true,
-        //   createdAt: true,
         },
       },
     },
