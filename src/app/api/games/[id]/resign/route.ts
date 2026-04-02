@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
+import { buildGamePgn } from "@/lib/pgn";
 
 type Params = {
   params: Promise<{
@@ -75,6 +76,14 @@ export async function POST(_request: NextRequest, { params }: Params) {
       result,
       finishedAt: new Date(),
       turnStartedAt: null,
+      pgn: buildGamePgn({
+        initialFen: game.initialFen,
+        moves: game.moves.map((m) => ({ uci: m.uci })),
+        whiteName: game.whitePlayer?.username,
+        blackName: game.blackPlayer?.username,
+        result,
+        createdAt: game.createdAt,
+      }),
     },
     include: {
       whitePlayer: {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
 import { Chess } from "chess.js";
+import { buildGamePgn } from "@/lib/pgn";
 
 type Params = {
   params: Promise<{
@@ -50,6 +51,12 @@ export async function POST(request: NextRequest, { params }: Params) {
   const game = await prisma.game.findUnique({
     where: { id },
     include: {
+      whitePlayer: {
+        select: { id: true, username: true, email: true },
+      },
+      blackPlayer: {
+        select: { id: true, username: true, email: true },
+      },
       moves: {
         orderBy: { moveNumber: "asc" },
       },
@@ -208,7 +215,17 @@ export async function POST(request: NextRequest, { params }: Params) {
       where: { id: game.id },
       data: {
         currentFen: chess.fen(),
-        pgn: chess.pgn(),
+        pgn: buildGamePgn({
+          initialFen: game.initialFen,
+          moves: [
+            ...game.moves.map((m) => ({ uci: m.uci })),
+            { uci: move.from + move.to + (move.promotion ?? "") },
+          ],
+          whiteName: game.whitePlayerId ? game.whitePlayer?.username : "White",
+          blackName: game.blackPlayerId ? game.blackPlayer?.username : "Black",
+          result: nextResult ?? "*",
+          createdAt: game.createdAt,
+        }),
         status: nextStatus,
         result: nextResult,
         finishedAt: nextStatus === "finished" ? now : null,
