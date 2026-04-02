@@ -209,6 +209,24 @@ export default function HomePage() {
     }
   }
 
+  async function handleLogout() {
+    try {
+      const response = await fetch("/api/auth/logout", {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        setError("Failed to log out");
+        return;
+      }
+
+      window.location.href = "/";
+    } catch (err) {
+      console.error("failed to log out", err);
+      setError("Failed to log out");
+    }
+  }
+
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col items-center justify-center gap-6 p-6 py-10">
       <div className="w-full rounded-2xl border bg-white p-8 shadow-sm">
@@ -255,11 +273,12 @@ export default function HomePage() {
                   {isCreating ? "Creating..." : "Create Private Game"}
                 </button>
 
-                <form action="/api/auth/logout" method="post">
-                  <button className="rounded-xl border px-6 py-3">
-                    Log out
-                  </button>
-                </form>
+                <button
+                  onClick={handleLogout}
+                  className="rounded-xl border px-6 py-3"
+                >
+                  Log out
+                </button>
               </div>
             </>
           ) : (
