@@ -65,7 +65,7 @@ export default async function GamesPage() {
                 <div className="mt-3">
                   <Link
                     className="text-blue-600 underline"
-                    href={`/game/${game.id}`}
+                    href={`/games/${game.id}/review`}
                   >
                     Review game
                   </Link>
