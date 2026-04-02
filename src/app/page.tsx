@@ -210,7 +210,7 @@ export default function HomePage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl flex-col items-center justify-center gap-6 p-6">
+    <main className="mx-auto flex w-full max-w-3xl flex-col items-center justify-center gap-6 p-6 py-10">
       <div className="w-full rounded-2xl border bg-white p-8 shadow-sm">
         <h1 className="text-4xl font-bold">Online Chess IR</h1>
         <p className="mt-3 text-gray-600">
