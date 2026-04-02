@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
-import { Chess } from "chess.js";
-import { buildGamePgn } from "@/lib/pgn";
+import { buildGamePgn, replayGameFromInitialFen } from "@/lib/pgn";
 
 type Params = {
   params: Promise<{
@@ -52,10 +51,10 @@ export async function POST(request: NextRequest, { params }: Params) {
     where: { id },
     include: {
       whitePlayer: {
-        select: { id: true, username: true, email: true },
+        select: { id: true, username: true },
       },
       blackPlayer: {
-        select: { id: true, username: true, email: true },
+        select: { id: true, username: true },
       },
       moves: {
         orderBy: { moveNumber: "asc" },
@@ -95,16 +94,24 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
-  const chess = new Chess();
+  let chess;
+  try {
+    chess = replayGameFromInitialFen(
+      game.initialFen,
+      game.moves.map((m) => ({ uci: m.uci }))
+    );
+  } catch (error) {
+    console.error("Failed to replay game before move", {
+      gameId: game.id,
+      initialFen: game.initialFen,
+      existingMoves: game.moves.map((m) => m.uci),
+      error,
+    });
 
-  for (const savedMove of game.moves) {
-    const result = chess.move(savedMove.uci);
-    if (!result) {
-      return NextResponse.json(
-        { ok: false, error: "Stored game history is invalid" },
-        { status: 500 }
-      );
-    }
+    return NextResponse.json(
+      { ok: false, error: "Stored game history is invalid" },
+      { status: 500 }
+    );
   }
 
   const now = new Date();
@@ -126,6 +133,30 @@ export async function POST(request: NextRequest, { params }: Params) {
   if (nextWhiteTimeMs <= 0 || nextBlackTimeMs <= 0) {
     const result = nextWhiteTimeMs <= 0 ? "0-1" : "1-0";
 
+    let timeoutPgn: string;
+    try {
+      timeoutPgn = buildGamePgn({
+        initialFen: game.initialFen,
+        moves: game.moves.map((m) => ({ uci: m.uci })),
+        whiteName: game.whitePlayer?.username,
+        blackName: game.blackPlayer?.username,
+        result,
+        createdAt: game.createdAt,
+      });
+    } catch (error) {
+      console.error("Failed to build PGN on timeout", {
+        gameId: game.id,
+        initialFen: game.initialFen,
+        existingMoves: game.moves.map((m) => m.uci),
+        error,
+      });
+
+      return NextResponse.json(
+        { ok: false, error: "Failed to save PGN on timeout" },
+        { status: 500 }
+      );
+    }
+
     const timedOutGame = await prisma.game.update({
       where: { id: game.id },
       data: {
@@ -133,15 +164,16 @@ export async function POST(request: NextRequest, { params }: Params) {
         blackTimeMs: nextBlackTimeMs,
         status: "finished",
         result,
+        pgn: timeoutPgn,
         finishedAt: now,
         turnStartedAt: null,
       },
       include: {
         whitePlayer: {
-          select: { id: true, username: true, email: true },
+          select: { id: true, username: true },
         },
         blackPlayer: {
-          select: { id: true, username: true, email: true },
+          select: { id: true, username: true },
         },
         moves: {
           orderBy: { moveNumber: "asc" },
@@ -201,6 +233,35 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   const moveNumber = game.moves.length + 1;
 
+  let nextPgn: string;
+
+  try {
+    nextPgn = buildGamePgn({
+      initialFen: game.initialFen,
+      moves: [
+        ...game.moves.map((m) => ({ uci: m.uci })),
+        { uci: move.from + move.to + (move.promotion ?? "") },
+      ],
+      whiteName: game.whitePlayer?.username,
+      blackName: game.blackPlayer?.username,
+      result: nextResult ?? "*",
+      createdAt: game.createdAt,
+    });
+  } catch (error) {
+    console.error("Failed to build PGN in move route", {
+      gameId: game.id,
+      initialFen: game.initialFen,
+      move: move.from + move.to + (move.promotion ?? ""),
+      existingMoves: game.moves.map((m) => m.uci),
+      error,
+    });
+
+    return NextResponse.json(
+      { ok: false, error: "Failed to save PGN for this move" },
+      { status: 500 }
+    );
+  }
+
   await prisma.$transaction([
     prisma.move.create({
       data: {
@@ -215,17 +276,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       where: { id: game.id },
       data: {
         currentFen: chess.fen(),
-        pgn: buildGamePgn({
-          initialFen: game.initialFen,
-          moves: [
-            ...game.moves.map((m) => ({ uci: m.uci })),
-            { uci: move.from + move.to + (move.promotion ?? "") },
-          ],
-          whiteName: game.whitePlayerId ? game.whitePlayer?.username : "White",
-          blackName: game.blackPlayerId ? game.blackPlayer?.username : "Black",
-          result: nextResult ?? "*",
-          createdAt: game.createdAt,
-        }),
+        pgn: nextPgn,
         status: nextStatus,
         result: nextResult,
         finishedAt: nextStatus === "finished" ? now : null,
@@ -240,10 +291,10 @@ export async function POST(request: NextRequest, { params }: Params) {
     where: { id: game.id },
     include: {
       whitePlayer: {
-        select: { id: true, username: true, email: true },
+        select: { id: true, username: true },
       },
       blackPlayer: {
-        select: { id: true, username: true, email: true },
+        select: { id: true, username: true },
       },
       moves: {
         orderBy: { moveNumber: "asc" },
@@ -272,7 +323,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       san: move.san,
       uci: move.from + move.to + (move.promotion ?? ""),
       fen: chess.fen(),
-      pgn: chess.pgn(),
+      pgn: nextPgn,
     },
     game: updatedGame,
   });

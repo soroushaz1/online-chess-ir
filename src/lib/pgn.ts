@@ -3,11 +3,13 @@ import { Chess } from "chess.js";
 const STANDARD_START_FEN =
   "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
+type UciMoveInput = {
+  uci: string;
+};
+
 type PgnGameInput = {
-  initialFen: string;
-  moves: Array<{
-    uci: string;
-  }>;
+  initialFen: string | null;
+  moves: UciMoveInput[];
   whiteName?: string | null;
   blackName?: string | null;
   result?: string | null;
@@ -26,16 +28,66 @@ function formatPgnDate(value?: Date | string | null) {
 }
 
 function isStandardStartPosition(initialFen?: string | null) {
-  return !initialFen || initialFen === "start" || initialFen === STANDARD_START_FEN;
+  return (
+    !initialFen ||
+    initialFen === "start" ||
+    initialFen === STANDARD_START_FEN
+  );
+}
+
+function createChessFromInitialFen(initialFen?: string | null) {
+  if (isStandardStartPosition(initialFen)) {
+    return new Chess();
+  }
+
+  return new Chess(initialFen as string);
+}
+
+function parseUciMove(uci: string) {
+  const normalized = uci.trim().toLowerCase();
+
+  if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(normalized)) {
+    throw new Error(`Invalid UCI move: ${uci}`);
+  }
+
+  const from = normalized.slice(0, 2);
+  const to = normalized.slice(2, 4);
+  const promotion =
+    normalized.length === 5
+      ? (normalized[4] as "q" | "r" | "b" | "n")
+      : undefined;
+
+  return { from, to, promotion };
+}
+
+export function replayGameFromInitialFen(
+  initialFen: string | null | undefined,
+  moves: UciMoveInput[]
+) {
+  const chess = createChessFromInitialFen(initialFen);
+
+  for (const move of moves) {
+    const parsedMove = parseUciMove(move.uci);
+    const result = chess.move(parsedMove);
+
+    if (!result) {
+      throw new Error(`Invalid move while replaying game: ${move.uci}`);
+    }
+  }
+
+  return chess;
 }
 
 export function buildGamePgn(input: PgnGameInput) {
-  const chess = isStandardStartPosition(input.initialFen)
-    ? new Chess()
-    : new Chess(input.initialFen);
+  const chess = createChessFromInitialFen(input.initialFen);
 
   for (const move of input.moves) {
-    chess.move(move.uci);
+    const parsedMove = parseUciMove(move.uci);
+    const result = chess.move(parsedMove);
+
+    if (!result) {
+      throw new Error(`Invalid move while building PGN: ${move.uci}`);
+    }
   }
 
   chess.setHeader("Event", "Online Chess IR");
@@ -48,7 +100,7 @@ export function buildGamePgn(input: PgnGameInput) {
 
   if (!isStandardStartPosition(input.initialFen)) {
     chess.setHeader("SetUp", "1");
-    chess.setHeader("FEN", input.initialFen);
+    chess.setHeader("FEN", input.initialFen as string);
   }
 
   return chess.pgn();
