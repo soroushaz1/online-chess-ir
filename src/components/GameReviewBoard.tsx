@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
+import { useStockfishAnalysis } from "@/hooks/useStockfishAnalysis";
 
 type Move = {
   id: string;
@@ -26,8 +28,79 @@ type GameReview = {
   moves: Move[];
 };
 
+function createChessFromFen(fen: string) {
+  return fen === "start" ? new Chess() : new Chess(fen);
+}
+
+function parseUciMove(uci: string) {
+  const normalized = uci.trim().toLowerCase();
+
+  if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(normalized)) {
+    return null;
+  }
+
+  return {
+    from: normalized.slice(0, 2),
+    to: normalized.slice(2, 4),
+    promotion:
+      normalized.length === 5
+        ? (normalized[4] as "q" | "r" | "b" | "n")
+        : undefined,
+  };
+}
+
+function formatEngineScore(scoreCp: number | null, mate: number | null) {
+  if (mate !== null) {
+    return mate > 0 ? `M${mate}` : `-M${Math.abs(mate)}`;
+  }
+
+  if (scoreCp === null) {
+    return "—";
+  }
+
+  const pawns = scoreCp / 100;
+  return pawns > 0 ? `+${pawns.toFixed(2)}` : pawns.toFixed(2);
+}
+
+function uciToSan(fen: string, uci: string | null) {
+  if (!uci) return null;
+
+  try {
+    const chess = createChessFromFen(fen);
+    const parsed = parseUciMove(uci);
+
+    if (!parsed) return uci;
+
+    const move = chess.move(parsed);
+    return move?.san ?? uci;
+  } catch {
+    return uci;
+  }
+}
+
+function pvToSan(fen: string, pv: string[]) {
+  if (pv.length === 0) return "";
+
+  try {
+    const chess = createChessFromFen(fen);
+
+    return pv
+      .map((uci) => {
+        const parsed = parseUciMove(uci);
+        if (!parsed) return uci;
+
+        const move = chess.move(parsed);
+        return move?.san ?? uci;
+      })
+      .join(" ");
+  } catch {
+    return pv.join(" ");
+  }
+}
+
 export default function GameReviewBoard({ game }: { game: GameReview }) {
   const [currentPly, setCurrentPly] = useState(game.moves.length);
+  const [analysisEnabled, setAnalysisEnabled] = useState(false);
 
   const currentFen =
     currentPly === 0 ? game.initialFen : game.moves[currentPly - 1].fenAfter;
@@ -54,6 +127,28 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
 
   const whiteName = game.whitePlayer?.username ?? "White";
   const blackName = game.blackPlayer?.username ?? "Black";
+
+  const {
+    engineReady,
+    analyzing,
+    depthReached,
+    scoreCp,
+    mate,
+    bestMove,
+    pv,
+    error,
+  } = useStockfishAnalysis({
+    enabled: analysisEnabled,
+    fen: currentFen,
+    depth: 12,
+  });
+
+  const bestMoveSan = useMemo(
+    () => uciToSan(currentFen, bestMove),
+    [currentFen, bestMove]
+  );
+
+  const pvSan = useMemo(() => pvToSan(currentFen, pv), [currentFen, pv]);
 
   function goToStart() {
     setCurrentPly(0);
@@ -130,6 +225,13 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
           >
             Download PGN
           </button>
+
+          <button
+            onClick={() => setAnalysisEnabled((value) => !value)}
+            className="rounded-xl border px-4 py-2"
+          >
+            {analysisEnabled ? "Stop Analysis" : "Analyze Position"}
+          </button>
         </div>
       </div>
 
@@ -181,6 +283,41 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
             <p className="mt-1 break-all">
               <span className="font-semibold">FEN:</span> {currentFen}
             </p>
+          </div>
+
+          <div className="mt-4 rounded-xl bg-gray-100 p-3 text-sm text-gray-700">
+            <div className="flex items-center justify-between gap-3">
+              <p className="font-semibold">Stockfish</p>
+              <p className="text-xs text-gray-500">
+                {analysisEnabled
+                  ? engineReady
+                    ? analyzing
+                      ? "Analyzing..."
+                      : "Ready"
+                    : "Loading engine..."
+                  : "Disabled"}
+              </p>
+            </div>
+
+            <div className="mt-3 grid gap-2 text-sm">
+              <p>
+                <span className="font-semibold">Depth:</span> {depthReached || 0}
+              </p>
+              <p>
+                <span className="font-semibold">Eval:</span>{" "}
+                {formatEngineScore(scoreCp, mate)}
+              </p>
+              <p>
+                <span className="font-semibold">Best move:</span>{" "}
+                {bestMoveSan ?? bestMove ?? "—"}
+              </p>
+              <p className="break-words">
+                <span className="font-semibold">PV:</span> {pvSan || "—"}
+              </p>
+              {error ? (
+                <p className="text-sm text-red-600">{error}</p>
+              ) : null}
+            </div>
           </div>
         </div>
 
