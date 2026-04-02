@@ -5,7 +5,13 @@ import {
   hashOtpCode,
   normalizeIranPhoneNumber,
 } from "@/lib/phone-auth";
-import { isGhasedakConfigured, sendOtpViaGhasedak } from "@/lib/ghasedak";
+
+function toGhasedakMobile(normalizedPhone: string) {
+  if (normalizedPhone.startsWith("+98")) {
+    return `0${normalizedPhone.slice(3)}`;
+  }
+  return normalizedPhone;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -48,28 +54,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const latestOtp = await prisma.otpCode.findFirst({
-      where: {
-        phoneNumber: normalizedPhone,
-        consumedAt: null,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
-
-    if (latestOtp && Date.now() - latestOtp.createdAt.getTime() < 45_000) {
-      return NextResponse.json(
-        { ok: false, error: "Please wait before requesting another code" },
-        { status: 429 }
-      );
-    }
-
     const code = generateOtpCode();
     const codeHash = hashOtpCode(code);
     const expiresAt = new Date(Date.now() + 1000 * 60 * 3);
 
-    const otp = await prisma.otpCode.create({
+    await prisma.otpCode.create({
       data: {
         phoneNumber: normalizedPhone,
         username: existingUser ? null : username ?? null,
@@ -78,31 +67,64 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    try {
-      if (isGhasedakConfigured()) {
-        await sendOtpViaGhasedak({
-          phoneNumber: normalizedPhone,
-          code,
-          clientReferenceId: `otp-${otp.id}`,
-        });
-      } else if (process.env.NODE_ENV === "production") {
-        throw new Error("Ghasedak is not configured");
-      }
-    } catch (error) {
-      await prisma.otpCode.delete({
-        where: { id: otp.id },
-      }).catch(() => {});
+    const apiKey = process.env.GHASEDAK_API_KEY;
+    const templateName =
+      process.env.GHASEDAK_TEMPLATE_NAME || "PlayOnlineChessOtp";
 
-      throw error;
+    if (!apiKey) {
+      throw new Error("GHASEDAK_API_KEY is not set");
+    }
+
+    const ghasedakResponse = await fetch(
+      "https://gateway.ghasedak.me/rest/api/v1/WebService/SendOtpWithParams",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          ApiKey: apiKey,
+        },
+        body: JSON.stringify({
+          receptors: [
+            {
+              mobile: toGhasedakMobile(normalizedPhone),
+              clientReferenceId: `${Date.now()}`,
+            },
+          ],
+          templateName,
+          param1: code,
+          isVoice: false,
+          udh: false,
+        }),
+      }
+    );
+
+    const ghasedakData = await ghasedakResponse.json().catch(() => null);
+    console.log("Ghasedak status:", ghasedakResponse.status);
+    console.log("Ghasedak response:", ghasedakData);
+
+    if (!ghasedakResponse.ok || ghasedakData?.IsSuccess === false) {
+      const message =
+        ghasedakData?.Message ||
+        "Ghasedak failed to send verification code";
+
+      return NextResponse.json(
+        { ok: false, error: message },
+        { status: 400 }
+      );
     }
 
     return NextResponse.json({
       ok: true,
       message: "Verification code sent",
-      ...(process.env.AUTH_DEBUG_SHOW_OTP === "true" ? { devCode: code } : {}),
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to send code";
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    const message =
+      error instanceof Error ? error.message : "Failed to send code";
+
+    return NextResponse.json(
+      { ok: false, error: message },
+      { status: 400 }
+    );
   }
 }

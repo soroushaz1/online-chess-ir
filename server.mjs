@@ -3,7 +3,7 @@ import next from "next";
 import { Server } from "socket.io";
 
 const dev = process.env.NODE_ENV !== "production";
-const hostname = process.env.HOST || "0.0.0.0";
+const hostname = "127.0.0.1";
 const port = Number(process.env.PORT || 3000);
 
 const app = next({ dev, hostname, port });
@@ -14,8 +14,9 @@ await app.prepare();
 const httpServer = createServer(handler);
 
 const io = new Server(httpServer, {
+  path: "/socket.io",
   cors: {
-    origin: process.env.APP_ORIGIN || true,
+    origin: "*",
   },
 });
 
@@ -31,6 +32,6 @@ io.on("connection", (socket) => {
 
 globalThis.io = io;
 
-httpServer.listen(port, hostname, () => {
+httpServer.listen(port, "127.0.0.1", () => {
   console.log(`> Ready on http://${hostname}:${port}`);
 });

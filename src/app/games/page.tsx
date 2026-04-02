@@ -1,9 +1,17 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function GamesPage() {
   const games = await prisma.game.findMany({
-    orderBy: { createdAt: "desc" },
+    where: {
+      status: "finished",
+    },
+    orderBy: {
+      finishedAt: "desc",
+    },
     include: {
       whitePlayer: {
         select: { username: true },
@@ -19,11 +27,11 @@ export default async function GamesPage() {
 
   return (
     <main className="mx-auto max-w-5xl p-6">
-      <h1 className="text-3xl font-bold">Games</h1>
+      <h1 className="text-3xl font-bold">Game History</h1>
 
       <div className="mt-6 space-y-4">
         {games.length === 0 ? (
-          <p>No games yet.</p>
+          <p>No finished games yet.</p>
         ) : (
           games.map((game) => {
             const whiteName = game.whitePlayer?.username ?? "Waiting...";
@@ -39,7 +47,7 @@ export default async function GamesPage() {
                 </p>
 
                 <p className="mt-1 text-sm text-gray-600">
-                  Status: {game.status} | Result: {game.result ?? "in progress"}
+                  Status: {game.status} | Result: {game.result ?? "unknown"}
                 </p>
 
                 <p className="mt-1 text-sm text-gray-600">
