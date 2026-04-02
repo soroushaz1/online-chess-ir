@@ -25,17 +25,17 @@ function formatPgnDate(value?: Date | string | null) {
   return `${yyyy}.${mm}.${dd}`;
 }
 
+function isStandardStartPosition(initialFen?: string | null) {
+  return !initialFen || initialFen === "start" || initialFen === STANDARD_START_FEN;
+}
+
 export function buildGamePgn(input: PgnGameInput) {
-  const chess =
-    input.initialFen && input.initialFen !== STANDARD_START_FEN
-      ? new Chess(input.initialFen)
-      : new Chess();
+  const chess = isStandardStartPosition(input.initialFen)
+    ? new Chess()
+    : new Chess(input.initialFen);
 
   for (const move of input.moves) {
-    const ok = chess.move(move.uci);
-    if (!ok) {
-      throw new Error(`Invalid move while building PGN: ${move.uci}`);
-    }
+    chess.move(move.uci);
   }
 
   chess.setHeader("Event", "Online Chess IR");
@@ -46,7 +46,7 @@ export function buildGamePgn(input: PgnGameInput) {
   chess.setHeader("Black", input.blackName?.trim() || "Black");
   chess.setHeader("Result", input.result ?? "*");
 
-  if (input.initialFen && input.initialFen !== STANDARD_START_FEN) {
+  if (!isStandardStartPosition(input.initialFen)) {
     chess.setHeader("SetUp", "1");
     chess.setHeader("FEN", input.initialFen);
   }
