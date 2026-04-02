@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getCurrentUser } from "@/lib/auth";
 import { Chess } from "chess.js";
 
 type Params = {
@@ -12,8 +13,25 @@ function getTurnFromFen(fen: string): "white" | "black" {
   return fen.split(" ")[1] === "b" ? "black" : "white";
 }
 
+function getPlayerSide(
+  game: { whitePlayerId: string | null; blackPlayerId: string | null },
+  userId: string
+): "white" | "black" | null {
+  if (game.whitePlayerId === userId) return "white";
+  if (game.blackPlayerId === userId) return "black";
+  return null;
+}
+
 export async function POST(request: NextRequest, { params }: Params) {
   const { id } = await params;
+  const currentUser = await getCurrentUser();
+
+  if (!currentUser) {
+    return NextResponse.json(
+      { ok: false, error: "You must be logged in" },
+      { status: 401 }
+    );
+  }
 
   const body = await request.json();
   const { from, to, promotion } = body as {
@@ -45,10 +63,28 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
+  const playerSide = getPlayerSide(game, currentUser.id);
+
+  if (!playerSide) {
+    return NextResponse.json(
+      { ok: false, error: "Only players can make moves" },
+      { status: 403 }
+    );
+  }
+
   if (game.status !== "active") {
     return NextResponse.json(
       { ok: false, error: "Game is not active" },
       { status: 400 }
+    );
+  }
+
+  const movingSide = getTurnFromFen(game.currentFen);
+
+  if (movingSide !== playerSide) {
+    return NextResponse.json(
+      { ok: false, error: "It is not your turn" },
+      { status: 403 }
     );
   }
 
@@ -64,10 +100,12 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
   }
 
-  const movingSide = getTurnFromFen(game.currentFen);
   const now = new Date();
   const turnStartedAt = game.turnStartedAt ?? game.createdAt;
-  const elapsedMs = Math.max(0, now.getTime() - new Date(turnStartedAt).getTime());
+  const elapsedMs = Math.max(
+    0,
+    now.getTime() - new Date(turnStartedAt).getTime()
+  );
 
   let nextWhiteTimeMs = game.whiteTimeMs;
   let nextBlackTimeMs = game.blackTimeMs;

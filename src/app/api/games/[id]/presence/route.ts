@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getCurrentUser } from "@/lib/auth";
 
 type Params = {
   params: Promise<{
@@ -7,18 +8,34 @@ type Params = {
   }>;
 };
 
+function getPlayerSide(
+  game: { whitePlayerId: string | null; blackPlayerId: string | null },
+  userId: string
+): "white" | "black" | null {
+  if (game.whitePlayerId === userId) return "white";
+  if (game.blackPlayerId === userId) return "black";
+  return null;
+}
+
 export async function POST(request: NextRequest, { params }: Params) {
   const { id } = await params;
+  const currentUser = await getCurrentUser();
+
+  if (!currentUser) {
+    return NextResponse.json(
+      { ok: false, error: "You must be logged in" },
+      { status: 401 }
+    );
+  }
 
   const body = await request.json();
-  const { side, connected } = body as {
-    side?: "white" | "black";
+  const { connected } = body as {
     connected?: boolean;
   };
 
-  if (!side || typeof connected !== "boolean") {
+  if (typeof connected !== "boolean") {
     return NextResponse.json(
-      { ok: false, error: "Missing side or connected" },
+      { ok: false, error: "Missing connected" },
       { status: 400 }
     );
   }
@@ -45,10 +62,19 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
+  const playerSide = getPlayerSide(game, currentUser.id);
+
+  if (!playerSide) {
+    return NextResponse.json(
+      { ok: false, error: "Only players can update presence" },
+      { status: 403 }
+    );
+  }
+
   const nextWhiteConnected =
-    side === "white" ? connected : game.whiteConnected;
+    playerSide === "white" ? connected : game.whiteConnected;
   const nextBlackConnected =
-    side === "black" ? connected : game.blackConnected;
+    playerSide === "black" ? connected : game.blackConnected;
 
   const bothSeatsFilled = !!game.whitePlayerId && !!game.blackPlayerId;
 

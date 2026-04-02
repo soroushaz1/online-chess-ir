@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getCurrentUser } from "@/lib/auth";
 
 type Params = {
   params: Promise<{
@@ -16,18 +17,23 @@ function hasSideMoved(
   );
 }
 
-export async function POST(request: NextRequest, { params }: Params) {
+function getPlayerSide(
+  game: { whitePlayerId: string | null; blackPlayerId: string | null },
+  userId: string
+): "white" | "black" | null {
+  if (game.whitePlayerId === userId) return "white";
+  if (game.blackPlayerId === userId) return "black";
+  return null;
+}
+
+export async function POST(_request: NextRequest, { params }: Params) {
   const { id } = await params;
+  const currentUser = await getCurrentUser();
 
-  const body = await request.json();
-  const { side } = body as {
-    side?: "white" | "black";
-  };
-
-  if (!side) {
+  if (!currentUser) {
     return NextResponse.json(
-      { ok: false, error: "Missing side" },
-      { status: 400 }
+      { ok: false, error: "You must be logged in" },
+      { status: 401 }
     );
   }
 
@@ -53,6 +59,15 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
+  const playerSide = getPlayerSide(game, currentUser.id);
+
+  if (!playerSide) {
+    return NextResponse.json(
+      { ok: false, error: "Only players can abort a game" },
+      { status: 403 }
+    );
+  }
+
   if (game.status === "finished") {
     return NextResponse.json(
       { ok: false, error: "Game already finished" },
@@ -60,7 +75,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
-  if (hasSideMoved(game.moves, side)) {
+  if (hasSideMoved(game.moves, playerSide)) {
     return NextResponse.json(
       { ok: false, error: "You can only abort before making your first move" },
       { status: 400 }

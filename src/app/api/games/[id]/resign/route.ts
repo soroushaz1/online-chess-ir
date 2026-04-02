@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getCurrentUser } from "@/lib/auth";
 
 type Params = {
   params: Promise<{
@@ -7,18 +8,23 @@ type Params = {
   }>;
 };
 
-export async function POST(request: NextRequest, { params }: Params) {
+function getPlayerSide(
+  game: { whitePlayerId: string | null; blackPlayerId: string | null },
+  userId: string
+): "white" | "black" | null {
+  if (game.whitePlayerId === userId) return "white";
+  if (game.blackPlayerId === userId) return "black";
+  return null;
+}
+
+export async function POST(_request: NextRequest, { params }: Params) {
   const { id } = await params;
+  const currentUser = await getCurrentUser();
 
-  const body = await request.json();
-  const { side } = body as {
-    side?: "white" | "black";
-  };
-
-  if (!side) {
+  if (!currentUser) {
     return NextResponse.json(
-      { ok: false, error: "Missing side" },
-      { status: 400 }
+      { ok: false, error: "You must be logged in" },
+      { status: 401 }
     );
   }
 
@@ -44,6 +50,15 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
+  const playerSide = getPlayerSide(game, currentUser.id);
+
+  if (!playerSide) {
+    return NextResponse.json(
+      { ok: false, error: "Only players can resign" },
+      { status: 403 }
+    );
+  }
+
   if (game.status !== "active" && game.status !== "waiting") {
     return NextResponse.json(
       { ok: false, error: "Game cannot be resigned" },
@@ -51,7 +66,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
-  const result = side === "white" ? "0-1" : "1-0";
+  const result = playerSide === "white" ? "0-1" : "1-0";
 
   const updatedGame = await prisma.game.update({
     where: { id },
