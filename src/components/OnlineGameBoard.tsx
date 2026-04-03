@@ -222,7 +222,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     if (!playerSide) return;
 
     try {
-      await fetch(`/api/games/${gameId}/presence`, {
+      const response = await fetch(`/api/games/${gameId}/presence`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -232,8 +232,19 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
           connected,
         }),
       });
+
+      const data: ActionResponse = await response.json();
+
+      if (response.ok && data.ok && data.game) {
+        setGame(data.game);
+        setBoardFen(data.game.currentFen);
+        setStatusMessage(getStatusMessage(data.game));
+        return;
+      }
+
+      await loadGame();
     } catch {
-      // ignore presence update failure for now
+      await loadGame();
     }
   }
 
@@ -292,9 +303,15 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
   useEffect(() => {
     if (!playerSide) return;
 
-    void updatePresence(true);
+    let active = true;
+
+    void (async () => {
+      if (!active) return;
+      await updatePresence(true);
+    })();
 
     return () => {
+      active = false;
       void updatePresence(false);
     };
   }, [playerSide, gameId]);
