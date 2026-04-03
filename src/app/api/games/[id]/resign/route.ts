@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
 import { buildGamePgn } from "@/lib/pgn";
+import { queueGameAnalysis } from "@/lib/game-analysis";
 
 type Params = {
   params: Promise<{
@@ -131,6 +132,8 @@ export async function POST(_request: NextRequest, { params }: Params) {
       game: updatedGame,
     });
   }
+
+  queueGameAnalysis(id);
 
   return NextResponse.json({
     ok: true,

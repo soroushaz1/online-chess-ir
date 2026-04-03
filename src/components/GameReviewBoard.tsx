@@ -1,10 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
-import { useStockfishAnalysis } from "@/hooks/useStockfishAnalysis";
-import { useMoveClassifications } from "@/hooks/useMoveClassifications";
 
 type Move = {
   id: string;
@@ -14,12 +12,32 @@ type Move = {
   fenAfter: string;
 };
 
+type AnalysisPosition = {
+  ply: number;
+  fen: string;
+  depthReached: number;
+  scoreCp: number | null;
+  mate: number | null;
+  bestMoveUci: string | null;
+  bestMoveSan: string | null;
+  pv: string | null;
+};
+
+type AnalysisMove = {
+  moveId: string;
+  moveNumber: number;
+  classification: string | null;
+  evalLossCp: number | null;
+};
+
 type GameReview = {
   id: string;
   initialFen: string;
   result: string | null;
   status: string;
   pgn: string | null;
+  analysisStatus: string;
+  analysisError: string | null;
   whitePlayer: {
     username: string;
   } | null;
@@ -27,9 +45,26 @@ type GameReview = {
     username: string;
   } | null;
   moves: Move[];
+  analysisPositions: AnalysisPosition[];
+  analysisMoves: AnalysisMove[];
 };
 
-type AnalysisMode = "depth" | "fast" | "normal" | "deep";
+type AnalysisResponse = {
+  ok: boolean;
+  analysis?: {
+    status: string;
+    startedAt: string | null;
+    completedAt: string | null;
+    error: string | null;
+    totalPositions: number;
+    analyzedPositions: number;
+    totalMoves: number;
+    analyzedMoves: number;
+    positions: AnalysisPosition[];
+    moves: AnalysisMove[];
+  };
+  error?: string;
+};
 
 function createChessFromFen(fen: string) {
   return fen === "start" ? new Chess() : new Chess(fen);
@@ -137,14 +172,7 @@ function evalToWhiteBarPercent(
   return 50 + normalized * 50;
 }
 
-function getTimePresetMs(mode: AnalysisMode) {
-  if (mode === "fast") return 800;
-  if (mode === "normal") return 1500;
-  if (mode === "deep") return 3000;
-  return null;
-}
-
-function getTagClasses(tag?: string) {
+function getTagClasses(tag?: string | null) {
   if (tag === "Brilliant") return "bg-fuchsia-600 text-white";
   if (tag === "Best") return "bg-green-600 text-white";
   if (tag === "Good") return "bg-emerald-100 text-emerald-800";
@@ -154,12 +182,88 @@ function getTagClasses(tag?: string) {
   return "bg-white hover:bg-gray-200";
 }
 
+function getAnalysisStatusText(status: string, error: string | null) {
+  if (status === "completed") return "Server analysis ready";
+  if (status === "running") return "Analyzing on server...";
+  if (status === "idle") return "Queued for server analysis";
+  if (status === "failed") return error ?? "Server analysis failed";
+  return "Waiting for analysis...";
+}
+
 export default function GameReviewBoard({ game }: { game: GameReview }) {
   const [currentPly, setCurrentPly] = useState(game.moves.length);
-  const [analysisEnabled, setAnalysisEnabled] = useState(false);
-  const [analysisMode, setAnalysisMode] = useState<AnalysisMode>("normal");
-  const [analysisDepth, setAnalysisDepth] = useState(14);
-  const [classifyMovesEnabled, setClassifyMovesEnabled] = useState(false);
+  const [analysisStatus, setAnalysisStatus] = useState(game.analysisStatus);
+  const [analysisError, setAnalysisError] = useState<string | null>(
+    game.analysisError
+  );
+  const [analysisPositions, setAnalysisPositions] = useState<AnalysisPosition[]>(
+    game.analysisPositions ?? []
+  );
+  const [analysisMoves, setAnalysisMoves] = useState<AnalysisMove[]>(
+    game.analysisMoves ?? []
+  );
+
+  const queueRequestedRef = useRef(false);
+
+  useEffect(() => {
+    if (game.status !== "finished") return;
+    if (analysisStatus !== "idle") return;
+    if (queueRequestedRef.current) return;
+
+    queueRequestedRef.current = true;
+
+    void fetch(`/api/games/${game.id}/analysis`, {
+      method: "POST",
+    }).catch(() => {
+      setAnalysisError("Failed to queue server analysis");
+    });
+  }, [game.id, game.status, analysisStatus]);
+
+  useEffect(() => {
+    if (game.status !== "finished") return;
+
+    let cancelled = false;
+
+    async function pollAnalysis() {
+      try {
+        const response = await fetch(`/api/games/${game.id}/analysis`, {
+          cache: "no-store",
+        });
+
+        const data: AnalysisResponse = await response.json();
+
+        if (!response.ok || !data.ok || !data.analysis || cancelled) {
+          return;
+        }
+
+        setAnalysisStatus(data.analysis.status);
+        setAnalysisError(data.analysis.error ?? null);
+        setAnalysisPositions(data.analysis.positions ?? []);
+        setAnalysisMoves(data.analysis.moves ?? []);
+      } catch {
+        if (!cancelled) {
+          setAnalysisError("Failed to load server analysis");
+        }
+      }
+    }
+
+    void pollAnalysis();
+
+    if (analysisStatus === "completed" || analysisStatus === "failed") {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const interval = setInterval(() => {
+      void pollAnalysis();
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [game.id, game.status, analysisStatus]);
 
   const currentFen =
     currentPly === 0 ? game.initialFen : game.moves[currentPly - 1].fenAfter;
@@ -187,29 +291,35 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
   const whiteName = game.whitePlayer?.username ?? "White";
   const blackName = game.blackPlayer?.username ?? "Black";
 
-  const movetimeMs = getTimePresetMs(analysisMode);
+  const analysisByPly = useMemo(() => {
+    return new Map(analysisPositions.map((item) => [item.ply, item]));
+  }, [analysisPositions]);
 
-  const analysis = useStockfishAnalysis({
-    enabled: analysisEnabled,
-    fen: currentFen,
-    depth: analysisMode === "depth" ? analysisDepth : undefined,
-    movetimeMs: analysisMode === "depth" ? undefined : movetimeMs ?? undefined,
-  });
+  const moveTagsById = useMemo(() => {
+    return new Map(
+      analysisMoves.map((item) => [item.moveId, item.classification ?? undefined])
+    );
+  }, [analysisMoves]);
+
+  const currentAnalysis = analysisByPly.get(currentPly);
 
   const whitePerspectiveEval = useMemo(
-    () => toWhitePerspective(currentFen, analysis.scoreCp, analysis.mate),
-    [currentFen, analysis.scoreCp, analysis.mate]
+    () =>
+      toWhitePerspective(
+        currentFen,
+        currentAnalysis?.scoreCp ?? null,
+        currentAnalysis?.mate ?? null
+      ),
+    [currentFen, currentAnalysis]
   );
 
-  const bestMoveSan = useMemo(
-    () => uciToSan(currentFen, analysis.bestMove),
-    [currentFen, analysis.bestMove]
-  );
+  const bestMoveSan =
+    currentAnalysis?.bestMoveSan ??
+    uciToSan(currentFen, currentAnalysis?.bestMoveUci ?? null);
 
-  const pvSan = useMemo(
-    () => pvToSan(currentFen, analysis.pv),
-    [currentFen, analysis.pv]
-  );
+  const pvSan = currentAnalysis?.pv
+    ? pvToSan(currentFen, currentAnalysis.pv.trim().split(/\s+/))
+    : "";
 
   const whiteBarPercent = useMemo(
     () =>
@@ -221,13 +331,6 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
   );
 
   const blackBarPercent = 100 - whiteBarPercent;
-
-  const classification = useMoveClassifications({
-    enabled: classifyMovesEnabled,
-    initialFen: game.initialFen,
-    moves: game.moves,
-    movetimeMs: 900,
-  });
 
   function goToStart() {
     setCurrentPly(0);
@@ -305,63 +408,9 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
             Download PGN
           </button>
 
-          <button
-            onClick={() => setAnalysisEnabled((value) => !value)}
-            className="rounded-xl border px-4 py-2"
-          >
-            {analysisEnabled ? "Stop Analysis" : "Analyze Position"}
-          </button>
-
-          <button
-            onClick={() => setClassifyMovesEnabled((value) => !value)}
-            className="rounded-xl border px-4 py-2"
-          >
-            {classifyMovesEnabled ? "Stop Move Labels" : "Label Moves"}
-          </button>
-
-          <div className="ml-2 flex items-center gap-2">
-            <label className="text-sm text-gray-700">Mode</label>
-            <select
-              value={analysisMode}
-              onChange={(e) => setAnalysisMode(e.target.value as AnalysisMode)}
-              className="rounded-xl border px-3 py-2 text-sm"
-            >
-              <option value="depth">Depth</option>
-              <option value="fast">Fast</option>
-              <option value="normal">Normal</option>
-              <option value="deep">Deep</option>
-            </select>
+          <div className="ml-2 rounded-xl bg-gray-100 px-3 py-2 text-sm text-gray-700">
+            {getAnalysisStatusText(analysisStatus, analysisError)}
           </div>
-
-          {analysisMode === "depth" ? (
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-gray-700">Depth</label>
-              <select
-                value={analysisDepth}
-                onChange={(e) => setAnalysisDepth(Number(e.target.value))}
-                className="rounded-xl border px-3 py-2 text-sm"
-              >
-                <option value={10}>10</option>
-                <option value={12}>12</option>
-                <option value={14}>14</option>
-                <option value={16}>16</option>
-                <option value={18}>18</option>
-              </select>
-            </div>
-          ) : (
-            <p className="text-sm text-gray-600">
-              {analysisMode === "fast" && "≈ 0.8s per position"}
-              {analysisMode === "normal" && "≈ 1.5s per position"}
-              {analysisMode === "deep" && "≈ 3s per position"}
-            </p>
-          )}
-
-          {classifyMovesEnabled ? (
-            <p className="text-sm text-gray-600">
-              Labeling: {classification.progress}/{classification.total}
-              {classification.running ? "..." : " done"}
-            </p>
-          ) : null}
         </div>
       </div>
 
@@ -437,20 +486,14 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
             <div className="flex items-center justify-between gap-3">
               <p className="font-semibold">Stockfish</p>
               <p className="text-xs text-gray-500">
-                {analysisEnabled
-                  ? analysis.engineReady
-                    ? analysis.analyzing
-                      ? "Analyzing..."
-                      : "Ready / Cached when available"
-                    : "Loading engine..."
-                  : "Disabled"}
+                {getAnalysisStatusText(analysisStatus, analysisError)}
               </p>
             </div>
 
             <div className="mt-3 grid gap-2 text-sm">
               <p>
                 <span className="font-semibold">Depth reached:</span>{" "}
-                {analysis.depthReached || 0}
+                {currentAnalysis?.depthReached ?? 0}
               </p>
               <p>
                 <span className="font-semibold">Eval:</span>{" "}
@@ -461,16 +504,13 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
               </p>
               <p>
                 <span className="font-semibold">Best move:</span>{" "}
-                {bestMoveSan ?? analysis.bestMove ?? "—"}
+                {bestMoveSan ?? "—"}
               </p>
               <p className="break-words">
                 <span className="font-semibold">PV:</span> {pvSan || "—"}
               </p>
-              {analysis.error ? (
-                <p className="text-sm text-red-600">{analysis.error}</p>
-              ) : null}
-              {classification.error ? (
-                <p className="text-sm text-red-600">{classification.error}</p>
+              {analysisError ? (
+                <p className="text-sm text-red-600">{analysisError}</p>
               ) : null}
             </div>
           </div>
@@ -489,11 +529,11 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
                   const blackSelected = row.black?.moveNumber === currentPly;
 
                   const whiteTag = row.white
-                    ? classification.tags[row.white.id]
+                    ? moveTagsById.get(row.white.id)
                     : undefined;
 
                   const blackTag = row.black
-                    ? classification.tags[row.black.id]
+                    ? moveTagsById.get(row.black.id)
                     : undefined;
 
                   return (

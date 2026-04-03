@@ -30,6 +30,8 @@ export default async function ReviewPage({ params }: PageProps) {
       status: true,
       result: true,
       pgn: true,
+      analysisStatus: true,
+      analysisError: true,
       whitePlayerId: true,
       blackPlayerId: true,
       whitePlayer: {
@@ -54,6 +56,28 @@ export default async function ReviewPage({ params }: PageProps) {
           fenAfter: true,
         },
       },
+      analysisPositions: {
+        orderBy: { ply: "asc" },
+        select: {
+          ply: true,
+          fen: true,
+          depthReached: true,
+          scoreCp: true,
+          mate: true,
+          bestMoveUci: true,
+          bestMoveSan: true,
+          pv: true,
+        },
+      },
+      analysisMoves: {
+        orderBy: { moveNumber: "asc" },
+        select: {
+          moveId: true,
+          moveNumber: true,
+          classification: true,
+          evalLossCp: true,
+        },
+      },
     },
   });
 
@@ -72,5 +96,5 @@ export default async function ReviewPage({ params }: PageProps) {
     redirect(`/game/${id}`);
   }
 
-  return <GameReviewBoard game={game} />;
+  return <GameReviewBoard key={game.id} game={game} />;
 }

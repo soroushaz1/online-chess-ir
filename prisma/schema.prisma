@@ -52,31 +52,37 @@ model OtpCode {
 }
 
 model Game {
-  id               String    @id @default(cuid())
-  whitePlayerId    String?
-  blackPlayerId    String?
-  whiteJoinToken   String?   @unique
-  blackJoinToken   String?   @unique
-  initialFen       String    @default("start")
-  currentFen       String
-  pgn              String    @default("")
-  status           String    @default("waiting")
-  result           String?
-  rated            Boolean   @default(false)
-  timeControlMs    Int       @default(600000)
-  incrementSeconds Int       @default(0)
-  whiteTimeMs      Int       @default(600000)
-  blackTimeMs      Int       @default(600000)
-  turnStartedAt    DateTime? @default(now())
-  whiteConnected   Boolean   @default(false)
-  blackConnected   Boolean   @default(false)
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  finishedAt       DateTime?
+  id                        String                 @id @default(cuid())
+  whitePlayerId             String?
+  blackPlayerId             String?
+  whiteJoinToken            String?                @unique
+  blackJoinToken            String?                @unique
+  initialFen                String                 @default("start")
+  currentFen                String
+  pgn                       String                 @default("")
+  status                    String                 @default("waiting")
+  result                    String?
+  rated                     Boolean                @default(false)
+  timeControlMs             Int                    @default(600000)
+  incrementSeconds          Int                    @default(0)
+  whiteTimeMs               Int                    @default(600000)
+  blackTimeMs               Int                    @default(600000)
+  turnStartedAt             DateTime?              @default(now())
+  whiteConnected            Boolean                @default(false)
+  blackConnected            Boolean                @default(false)
+  analysisStatus            String                 @default("idle")
+  analysisStartedAt         DateTime?
+  analysisCompletedAt       DateTime?
+  analysisError             String?
+  createdAt                 DateTime               @default(now())
+  updatedAt                 DateTime               @updatedAt
+  finishedAt                DateTime?
 
   whitePlayer User? @relation("WhitePlayerGames", fields: [whitePlayerId], references: [id])
   blackPlayer User? @relation("BlackPlayerGames", fields: [blackPlayerId], references: [id])
   moves       Move[]
+  analysisPositions GameAnalysisPosition[]
+  analysisMoves     GameAnalysisMove[]
 }
 
 model Move {
@@ -88,7 +94,44 @@ model Move {
   fenAfter   String
   createdAt  DateTime @default(now())
 
+  game     Game              @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  analysis GameAnalysisMove?
+
+  @@index([gameId, moveNumber])
+}
+
+model GameAnalysisPosition {
+  id           String   @id @default(cuid())
+  gameId       String
+  ply          Int
+  fen          String
+  depthReached Int      @default(0)
+  scoreCp      Int?
+  mate         Int?
+  bestMoveUci  String?
+  bestMoveSan  String?
+  pv           String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
   game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, ply])
+  @@index([gameId])
+}
+
+model GameAnalysisMove {
+  id            String   @id @default(cuid())
+  gameId        String
+  moveId        String   @unique
+  moveNumber    Int
+  classification String?
+  evalLossCp    Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  move Move @relation(fields: [moveId], references: [id], onDelete: Cascade)
 
   @@index([gameId, moveNumber])
 }

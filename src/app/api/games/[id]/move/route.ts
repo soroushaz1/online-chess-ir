@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
 import { buildGamePgn, replayGameFromInitialFen } from "@/lib/pgn";
+import { queueGameAnalysis } from "@/lib/game-analysis";
 
 type Params = {
   params: Promise<{
@@ -196,6 +197,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       });
     }
 
+    queueGameAnalysis(game.id);
+
     return NextResponse.json(
       { ok: false, error: "Time out", game: timedOutGame },
       { status: 400 }
@@ -315,6 +318,10 @@ export async function POST(request: NextRequest, { params }: Params) {
       gameId: game.id,
       game: updatedGame,
     });
+  }
+
+  if (updatedGame?.status === "finished") {
+    queueGameAnalysis(updatedGame.id);
   }
 
   return NextResponse.json({
