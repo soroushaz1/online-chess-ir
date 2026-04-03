@@ -1,8 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useSearchParams } from "next/navigation";
-import { Chess } from "chess.js";
+import { Chess, type Square } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import { getSocket } from "@/lib/socket";
 
@@ -22,6 +29,8 @@ type Move = {
 };
 
 type Side = "white" | "black";
+type PromotionPiece = "q" | "r" | "b" | "n";
+type SoundName = "move" | "capture" | "check" | "gameEnd";
 
 type CurrentUser = {
   id: string;
@@ -64,6 +73,11 @@ type ActionResponse = {
 type MeResponse = {
   ok: boolean;
   user: CurrentUser | null;
+};
+
+type HighlightedMove = {
+  square: string;
+  isCapture: boolean;
 };
 
 function getTurnFromFen(fen: string): Side {
@@ -147,6 +161,77 @@ function hasSideMoved(moves: Move[], side: Side) {
   );
 }
 
+function canPlayerInteract(
+  game: Game | null,
+  playerSide: Side | null,
+  isSubmitting: boolean
+) {
+  if (!game || !playerSide || isSubmitting) return false;
+  if (game.status !== "active") return false;
+  return getTurnFromFen(game.currentFen) === playerSide;
+}
+
+function isBoardSquare(value: string): value is Square {
+  return /^[a-h][1-8]$/.test(value);
+}
+
+function getPromotionFromUci(uci: string): PromotionPiece | undefined {
+  const promotion = uci[4];
+  if (
+    promotion === "q" ||
+    promotion === "r" ||
+    promotion === "b" ||
+    promotion === "n"
+  ) {
+    return promotion;
+  }
+  return undefined;
+}
+
+function getSoundForGameUpdate(
+  previousGame: Game,
+  nextGame: Game
+): SoundName | null {
+  if (nextGame.moves.length > previousGame.moves.length) {
+    const lastMove = nextGame.moves[nextGame.moves.length - 1];
+
+    try {
+      const chess = new Chess(previousGame.currentFen);
+      const move = chess.move({
+        from: lastMove.uci.slice(0, 2),
+        to: lastMove.uci.slice(2, 4),
+        promotion: getPromotionFromUci(lastMove.uci),
+      });
+
+      if (!move) {
+        return nextGame.status === "finished" ? "gameEnd" : "move";
+      }
+
+      if (move.san.includes("#") || nextGame.status === "finished") {
+        return "gameEnd";
+      }
+
+      if (move.san.includes("+")) {
+        return "check";
+      }
+
+      if (move.captured) {
+        return "capture";
+      }
+
+      return "move";
+    } catch {
+      return nextGame.status === "finished" ? "gameEnd" : "move";
+    }
+  }
+
+  if (previousGame.status !== "finished" && nextGame.status === "finished") {
+    return "gameEnd";
+  }
+
+  return null;
+}
+
 export default function OnlineGameBoard({ gameId }: { gameId: string }) {
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
@@ -158,12 +243,115 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [, setTick] = useState(0);
 
+  const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
+  const [highlightedMoves, setHighlightedMoves] = useState<HighlightedMove[]>(
+    []
+  );
+  const [soundEnabled, setSoundEnabled] = useState(true);
+
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const hasSeenInitialGameRef = useRef(false);
+  const previousGameRef = useRef<Game | null>(null);
+
   const playerSide = useMemo<Side | null>(() => {
     if (!game || !currentUser) return null;
     if (game.whitePlayerId === currentUser.id) return "white";
     if (game.blackPlayerId === currentUser.id) return "black";
     return null;
   }, [game, currentUser]);
+
+  const boardIsInteractive = useMemo(
+    () => canPlayerInteract(game, playerSide, isSubmitting),
+    [game, playerSide, isSubmitting]
+  );
+
+  const clearMoveHighlights = useCallback(() => {
+    setSelectedSquare(null);
+    setHighlightedMoves([]);
+  }, []);
+
+  const ensureAudioContext = useCallback(async () => {
+    if (typeof window === "undefined") return null;
+
+    const AudioContextClass =
+      window.AudioContext ||
+      (window as Window & { webkitAudioContext?: typeof AudioContext })
+        .webkitAudioContext;
+
+    if (!AudioContextClass) return null;
+
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContextClass();
+    }
+
+    if (audioContextRef.current.state === "suspended") {
+      await audioContextRef.current.resume();
+    }
+
+    return audioContextRef.current;
+  }, []);
+
+  const playSound = useCallback(
+    async (sound: SoundName) => {
+      if (!soundEnabled) return;
+
+      const context = await ensureAudioContext();
+      if (!context) return;
+
+      const now = context.currentTime + 0.01;
+
+      const scheduleTone = (
+        frequency: number,
+        start: number,
+        duration: number,
+        type: OscillatorType,
+        volume: number
+      ) => {
+        const oscillator = context.createOscillator();
+        const gainNode = context.createGain();
+
+        oscillator.type = type;
+        oscillator.frequency.setValueAtTime(frequency, start);
+
+        gainNode.gain.setValueAtTime(0.0001, start);
+        gainNode.gain.exponentialRampToValueAtTime(volume, start + 0.01);
+        gainNode.gain.exponentialRampToValueAtTime(
+          0.0001,
+          start + duration
+        );
+
+        oscillator.connect(gainNode);
+        gainNode.connect(context.destination);
+
+        oscillator.start(start);
+        oscillator.stop(start + duration + 0.03);
+      };
+
+      if (sound === "move") {
+        scheduleTone(660, now, 0.06, "sine", 0.03);
+        scheduleTone(880, now + 0.07, 0.08, "sine", 0.025);
+        return;
+      }
+
+      if (sound === "capture") {
+        scheduleTone(440, now, 0.07, "square", 0.04);
+        scheduleTone(220, now + 0.08, 0.12, "square", 0.035);
+        return;
+      }
+
+      if (sound === "check") {
+        scheduleTone(740, now, 0.06, "triangle", 0.03);
+        scheduleTone(880, now + 0.08, 0.06, "triangle", 0.03);
+        scheduleTone(1047, now + 0.16, 0.1, "triangle", 0.035);
+        return;
+      }
+
+      scheduleTone(523, now, 0.12, "sine", 0.03);
+      scheduleTone(392, now + 0.14, 0.12, "sine", 0.03);
+      scheduleTone(262, now + 0.28, 0.22, "sine", 0.035);
+    },
+    [ensureAudioContext, soundEnabled]
+  );
 
   const loadGame = useCallback(async () => {
     try {
@@ -186,36 +374,33 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     }
   }, [gameId]);
 
-  const tryJoinGame = useCallback(
-    async () => {
-      if (!token) return;
+  const tryJoinGame = useCallback(async () => {
+    if (!token) return;
 
-      try {
-        const response = await fetch(`/api/games/${gameId}/join`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ token }),
-        });
+    try {
+      const response = await fetch(`/api/games/${gameId}/join`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ token }),
+      });
 
-        const data: ActionResponse = await response.json();
+      const data: ActionResponse = await response.json();
 
-        if (!response.ok || !data.ok || !data.game) {
-          setStatusMessage(data.error ?? "Failed to join game");
-          return;
-        }
-
-        setGame(data.game);
-        setBoardFen(data.game.currentFen);
-        setStatusMessage(getStatusMessage(data.game));
-      } catch (error) {
-        console.error("join failed", error);
-        setStatusMessage("Failed to join game");
+      if (!response.ok || !data.ok || !data.game) {
+        setStatusMessage(data.error ?? "Failed to join game");
+        return;
       }
-    },
-    [gameId, token]
-  );
+
+      setGame(data.game);
+      setBoardFen(data.game.currentFen);
+      setStatusMessage(getStatusMessage(data.game));
+    } catch (error) {
+      console.error("join failed", error);
+      setStatusMessage("Failed to join game");
+    }
+  }, [gameId, token]);
 
   const updatePresence = useCallback(
     async (connected: boolean) => {
@@ -248,6 +433,89 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     },
     [playerSide, gameId, loadGame]
   );
+
+  const showLegalMovesForSquare = useCallback(
+    (square: string) => {
+      if (!boardIsInteractive || !game || !playerSide) {
+        clearMoveHighlights();
+        return;
+      }
+
+      if (!isBoardSquare(square)) {
+        clearMoveHighlights();
+        return;
+      }
+
+      const piece = getPieceAtSquare(game.currentFen, square);
+
+      if (!piece || !isPieceOfSide(piece, playerSide)) {
+        clearMoveHighlights();
+        return;
+      }
+
+      const chess = new Chess(game.currentFen);
+      const moves = chess.moves({ square, verbose: true });
+
+      if (!moves.length) {
+        clearMoveHighlights();
+        return;
+      }
+
+      setSelectedSquare(square);
+      setHighlightedMoves(
+        moves.map((move) => ({
+          square: move.to,
+          isCapture: Boolean(move.captured),
+        }))
+      );
+    },
+    [boardIsInteractive, game, playerSide, clearMoveHighlights]
+  );
+
+  const moveHighlightStyles = useMemo<Record<string, CSSProperties>>(() => {
+    const styles: Record<string, CSSProperties> = {};
+
+    if (selectedSquare) {
+      styles[selectedSquare] = {
+        backgroundColor: "rgba(250, 204, 21, 0.45)",
+        boxShadow: "inset 0 0 0 3px rgba(202, 138, 4, 0.9)",
+      };
+    }
+
+    for (const move of highlightedMoves) {
+      styles[move.square] = move.isCapture
+        ? {
+          backgroundColor: "rgba(34, 197, 94, 0.18)",
+          boxShadow: "inset 0 0 0 4px rgba(34, 197, 94, 0.85)",
+        }
+        : {
+          background:
+            "radial-gradient(circle, rgba(34, 197, 94, 0.45) 20%, transparent 22%)",
+        };
+    }
+
+    return styles;
+  }, [selectedSquare, highlightedMoves]);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(
+        "online-chess-sound-enabled"
+      );
+      if (saved !== null) {
+        setSoundEnabled(saved === "true");
+      }
+    } catch { }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "online-chess-sound-enabled",
+        String(soundEnabled)
+      );
+    } catch { }
+  }, [soundEnabled]);
 
   useEffect(() => {
     async function initializePage() {
@@ -317,6 +585,52 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     };
   }, [playerSide, gameId, updatePresence]);
 
+  useEffect(() => {
+    clearMoveHighlights();
+  }, [boardFen, clearMoveHighlights]);
+
+  useEffect(() => {
+    if (!boardIsInteractive) {
+      clearMoveHighlights();
+    }
+  }, [boardIsInteractive, clearMoveHighlights]);
+
+  useEffect(() => {
+    if (!game) return;
+
+    if (!hasSeenInitialGameRef.current) {
+      hasSeenInitialGameRef.current = true;
+      previousGameRef.current = game;
+      return;
+    }
+
+    const previousGame = previousGameRef.current;
+
+    if (!previousGame) {
+      previousGameRef.current = game;
+      return;
+    }
+
+    const soundToPlay = getSoundForGameUpdate(previousGame, game);
+
+    if (soundToPlay) {
+      void playSound(soundToPlay);
+    }
+
+    previousGameRef.current = game;
+  }, [game, playSound]);
+
+  useEffect(() => {
+    return () => {
+      const context = audioContextRef.current;
+      audioContextRef.current = null;
+
+      if (context) {
+        void context.close().catch(() => { });
+      }
+    };
+  }, []);
+
   const submitMove = useCallback(
     async (from: string, to: string) => {
       try {
@@ -356,6 +670,8 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
   async function handleResign() {
     if (!playerSide || !game) return;
 
+    void ensureAudioContext();
+
     try {
       const response = await fetch(`/api/games/${gameId}/resign`, {
         method: "POST",
@@ -385,6 +701,8 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
   async function handleAbort() {
     if (!playerSide || !game) return;
 
+    void ensureAudioContext();
+
     try {
       const response = await fetch(`/api/games/${gameId}/abort`, {
         method: "POST",
@@ -411,63 +729,111 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     }
   }
 
+  const attemptMove = useCallback(
+    (sourceSquare: string, targetSquare: string) => {
+      if (!game || isSubmitting) return false;
+
+      if (!playerSide) {
+        setStatusMessage("Spectators cannot move pieces");
+        return false;
+      }
+
+      if (game.status !== "active") {
+        setStatusMessage("Game has not started yet");
+        return false;
+      }
+
+      const currentTurn = getTurnFromFen(game.currentFen);
+
+      if (currentTurn !== playerSide) {
+        setStatusMessage("It is not your turn");
+        return false;
+      }
+
+      const piece = getPieceAtSquare(game.currentFen, sourceSquare);
+
+      if (!piece) {
+        setStatusMessage("No piece on that square");
+        return false;
+      }
+
+      if (!isPieceOfSide(piece, playerSide)) {
+        setStatusMessage("You can only move your own pieces");
+        return false;
+      }
+
+      const chess = new Chess(game.currentFen);
+
+      let move;
+      try {
+        move = chess.move({
+          from: sourceSquare,
+          to: targetSquare,
+          promotion: "q",
+        });
+      } catch {
+        setStatusMessage("Illegal move");
+        return false;
+      }
+
+      if (!move) {
+        setStatusMessage("Illegal move");
+        return false;
+      }
+
+      clearMoveHighlights();
+      setIsSubmitting(true);
+      setBoardFen(chess.fen());
+      setStatusMessage("Submitting move...");
+      void submitMove(sourceSquare, targetSquare);
+
+      return true;
+    },
+    [game, isSubmitting, playerSide, clearMoveHighlights, submitMove]
+  );
+
   function onPieceDrop(sourceSquare: string, targetSquare: string) {
-    if (!game || isSubmitting) return false;
+    void ensureAudioContext();
+    return attemptMove(sourceSquare, targetSquare);
+  }
 
-    if (!playerSide) {
-      setStatusMessage("Spectators cannot move pieces");
-      return false;
+  function handleSquareClick(square: string) {
+    void ensureAudioContext();
+
+    if (!game || isSubmitting) return;
+
+    if (selectedSquare) {
+      if (square === selectedSquare) {
+        clearMoveHighlights();
+        return;
+      }
+
+      const isHighlightedTarget = highlightedMoves.some(
+        (move) => move.square === square
+      );
+
+      if (isHighlightedTarget) {
+        attemptMove(selectedSquare, square);
+        return;
+      }
     }
 
-    if (game.status !== "active") {
-      setStatusMessage("Game has not started yet");
-      return false;
+    showLegalMovesForSquare(square);
+  }
+
+  function handlePieceDragBegin(_piece: string, sourceSquare: string) {
+    void ensureAudioContext();
+    showLegalMovesForSquare(sourceSquare);
+  }
+
+  async function handleToggleSound() {
+    const nextValue = !soundEnabled;
+    setSoundEnabled(nextValue);
+
+    if (nextValue) {
+      await ensureAudioContext();
+      void playSound("move");
     }
-
-    const currentTurn = getTurnFromFen(game.currentFen);
-
-    if (currentTurn !== playerSide) {
-      setStatusMessage("It is not your turn");
-      return false;
-    }
-
-    const piece = getPieceAtSquare(game.currentFen, sourceSquare);
-
-    if (!piece) {
-      setStatusMessage("No piece on that square");
-      return false;
-    }
-
-    if (!isPieceOfSide(piece, playerSide)) {
-      setStatusMessage("You can only move your own pieces");
-      return false;
-    }
-
-    const chess = new Chess(game.currentFen);
-
-    let move;
-    try {
-      move = chess.move({
-        from: sourceSquare,
-        to: targetSquare,
-        promotion: "q",
-      });
-    } catch {
-      setStatusMessage("Illegal move");
-      return false;
-    }
-
-    if (!move) {
-      setStatusMessage("Illegal move");
-      return false;
-    }
-
-    setIsSubmitting(true);
-    setBoardFen(chess.fen());
-    setStatusMessage("Submitting move...");
-    void submitMove(sourceSquare, targetSquare);
-
-    return true;
   }
 
   return (
@@ -480,8 +846,13 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       <div className="grid gap-4 md:grid-cols-[1fr_320px]">
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
           <Chessboard
+            id="online-game-board"
             position={boardFen}
             onPieceDrop={onPieceDrop}
+            onSquareClick={handleSquareClick}
+            onPieceDragBegin={handlePieceDragBegin}
+            customSquareStyles={moveHighlightStyles}
+            arePiecesDraggable={boardIsInteractive}
             boardOrientation={playerSide ?? "white"}
           />
         </div>
@@ -522,6 +893,26 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
               <span className="font-semibold">Black clock:</span>{" "}
               {game ? formatClock(getLiveClockMs(game, "black")) : "..."}
             </p>
+            <div className="flex items-center justify-between">
+              <span className="text-sm">
+                <span className="font-semibold">Sound:</span>{" "}
+                {soundEnabled ? "On" : "Off"}
+              </span>
+
+              <button
+                type="button"
+                onClick={handleToggleSound}
+                aria-pressed={soundEnabled}
+                aria-label={soundEnabled ? "Turn sound off" : "Turn sound on"}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${soundEnabled ? "bg-blue-600" : "bg-gray-300"
+                  }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${soundEnabled ? "translate-x-6" : "translate-x-1"
+                    }`}
+                />
+              </button>
+            </div>
             <p>
               <span className="font-semibold">Status:</span> {statusMessage}
             </p>
