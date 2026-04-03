@@ -93,7 +93,7 @@ export default function HomePage() {
       });
       const data: MatchmakingStatusResponse = await response.json();
 
-      console.log("matchmaking status", data);
+      // console.log("matchmaking status", data);
 
       if (data.hasActiveGame && data.activeGameId) {
         setActiveGameId(data.activeGameId);
@@ -175,7 +175,7 @@ export default function HomePage() {
 
       const data: MatchmakingJoinResponse = await response.json();
 
-      console.log("matchmaking join response", data);
+      // console.log("matchmaking join response", data);
 
       if (!response.ok || !data.ok) {
         wasSearchingRef.current = false;

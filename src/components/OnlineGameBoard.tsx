@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
@@ -165,7 +165,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     return null;
   }, [game, currentUser]);
 
-  async function loadGame() {
+  const loadGame = useCallback(async () => {
     try {
       const response = await fetch(`/api/games/${gameId}`, {
         cache: "no-store",
@@ -184,69 +184,70 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     } catch {
       setStatusMessage("Failed to load game");
     }
-  }
+  }, [gameId]);
 
-  async function tryJoinGame(activeUser: CurrentUser) {
-    if (!token) return;
+  const tryJoinGame = useCallback(
+    async () => {
+      if (!token) return;
 
-    try {
-      const response = await fetch(`/api/games/${gameId}/join`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ token }),
-      });
+      try {
+        const response = await fetch(`/api/games/${gameId}/join`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ token }),
+        });
 
-      const data: ActionResponse = await response.json();
+        const data: ActionResponse = await response.json();
 
-      console.log("join response", response.status, data, "user", activeUser);
+        if (!response.ok || !data.ok || !data.game) {
+          setStatusMessage(data.error ?? "Failed to join game");
+          return;
+        }
 
-      if (!response.ok || !data.ok || !data.game) {
-        setStatusMessage(data.error ?? "Failed to join game");
-        return;
-      }
-
-      setGame(data.game);
-      setBoardFen(data.game.currentFen);
-      setStatusMessage(getStatusMessage(data.game));
-
-      await loadGame();
-    } catch (error) {
-      console.error("join failed", error);
-      setStatusMessage("Failed to join game");
-    }
-  }
-
-  async function updatePresence(connected: boolean) {
-    if (!playerSide) return;
-
-    try {
-      const response = await fetch(`/api/games/${gameId}/presence`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          side: playerSide,
-          connected,
-        }),
-      });
-
-      const data: ActionResponse = await response.json();
-
-      if (response.ok && data.ok && data.game) {
         setGame(data.game);
         setBoardFen(data.game.currentFen);
         setStatusMessage(getStatusMessage(data.game));
-        return;
+      } catch (error) {
+        console.error("join failed", error);
+        setStatusMessage("Failed to join game");
       }
+    },
+    [gameId, token]
+  );
 
-      await loadGame();
-    } catch {
-      await loadGame();
-    }
-  }
+  const updatePresence = useCallback(
+    async (connected: boolean) => {
+      if (!playerSide) return;
+
+      try {
+        const response = await fetch(`/api/games/${gameId}/presence`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            connected,
+          }),
+        });
+
+        const data: ActionResponse = await response.json();
+
+        if (response.ok && data.ok && data.game) {
+          setGame(data.game);
+          setBoardFen(data.game.currentFen);
+          setStatusMessage(getStatusMessage(data.game));
+          return;
+        }
+
+        await loadGame();
+      } catch {
+        await loadGame();
+      }
+    },
+    [playerSide, gameId, loadGame]
+  );
 
   useEffect(() => {
     async function initializePage() {
@@ -257,7 +258,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
         setCurrentUser(meData.user);
 
         if (meData.user && token) {
-          await tryJoinGame(meData.user);
+          await tryJoinGame();
         }
 
         await loadGame();
@@ -268,7 +269,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     }
 
     void initializePage();
-  }, [gameId, token]);
+  }, [gameId, token, tryJoinGame, loadGame]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -314,40 +315,43 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       active = false;
       void updatePresence(false);
     };
-  }, [playerSide, gameId]);
+  }, [playerSide, gameId, updatePresence]);
 
-  async function submitMove(from: string, to: string) {
-    try {
-      const response = await fetch(`/api/games/${gameId}/move`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from,
-          to,
-          promotion: "q",
-        }),
-      });
+  const submitMove = useCallback(
+    async (from: string, to: string) => {
+      try {
+        const response = await fetch(`/api/games/${gameId}/move`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            from,
+            to,
+            promotion: "q",
+          }),
+        });
 
-      const data: ActionResponse = await response.json();
+        const data: ActionResponse = await response.json();
 
-      if (!response.ok || !data.ok || !data.game) {
+        if (!response.ok || !data.ok || !data.game) {
+          await loadGame();
+          setStatusMessage(data.error ?? "Move failed");
+          return;
+        }
+
+        setGame(data.game);
+        setBoardFen(data.game.currentFen);
+        setStatusMessage(getStatusMessage(data.game));
+      } catch {
         await loadGame();
-        setStatusMessage(data.error ?? "Move failed");
-        return;
+        setStatusMessage("Move failed");
+      } finally {
+        setIsSubmitting(false);
       }
-
-      setGame(data.game);
-      setBoardFen(data.game.currentFen);
-      setStatusMessage(getStatusMessage(data.game));
-    } catch {
-      await loadGame();
-      setStatusMessage("Move failed");
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
+    },
+    [gameId, loadGame]
+  );
 
   async function handleResign() {
     if (!playerSide || !game) return;
