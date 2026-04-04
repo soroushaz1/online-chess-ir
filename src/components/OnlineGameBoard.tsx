@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   type CSSProperties,
   useCallback,
@@ -12,6 +13,8 @@ import { useSearchParams } from "next/navigation";
 import { Chess, type Square } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import { getSocket } from "@/lib/socket";
+import { useI18n } from "@/components/LanguageProvider";
+import { messages } from "@/lib/i18n";
 
 type Player = {
   id: string;
@@ -31,6 +34,7 @@ type Move = {
 type Side = "white" | "black";
 type PromotionPiece = "q" | "r" | "b" | "n";
 type SoundName = "move" | "capture" | "check" | "gameEnd";
+type GameMessages = (typeof messages)["fa"]["game"];
 
 type CurrentUser = {
   id: string;
@@ -84,8 +88,8 @@ function getTurnFromFen(fen: string): Side {
   return fen.split(" ")[1] === "b" ? "black" : "white";
 }
 
-function getTurnTextFromFen(fen: string) {
-  return getTurnFromFen(fen) === "white" ? "White" : "Black";
+function getTurnLabelFromFen(fen: string, tGame: GameMessages) {
+  return getTurnFromFen(fen) === "white" ? tGame.white : tGame.black;
 }
 
 function getPieceAtSquare(fen: string, square: string): string | null {
@@ -115,10 +119,10 @@ function isPieceOfSide(piece: string, side: Side) {
   return side === "white" ? isWhitePiece : !isWhitePiece;
 }
 
-function getSideLabel(side: Side | null) {
-  if (side === "white") return "White";
-  if (side === "black") return "Black";
-  return "Spectator";
+function getSideLabel(side: Side | null, tGame: GameMessages) {
+  if (side === "white") return tGame.white;
+  if (side === "black") return tGame.black;
+  return tGame.spectator;
 }
 
 function formatClock(ms: number) {
@@ -143,16 +147,16 @@ function getLiveClockMs(game: Game, side: Side) {
   return Math.max(0, base - elapsed);
 }
 
-function getStatusMessage(game: Game) {
+function getStatusMessage(game: Game, tGame: GameMessages) {
   if (game.status === "waiting") {
-    return "Waiting for both players to join";
+    return tGame.waitingPlayers;
   }
 
   if (game.status === "finished") {
-    return `Game finished${game.result ? `: ${game.result}` : ""}`;
+    return `${tGame.finished}${game.result ? `: ${game.result}` : ""}`;
   }
 
-  return `${getTurnTextFromFen(game.currentFen)} to move`;
+  return `${getTurnLabelFromFen(game.currentFen, tGame)} ${tGame.toMove}`;
 }
 
 function hasSideMoved(moves: Move[], side: Side) {
@@ -235,11 +239,14 @@ function getSoundForGameUpdate(
 export default function OnlineGameBoard({ gameId }: { gameId: string }) {
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
+  const { t, language } = useI18n();
 
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [game, setGame] = useState<Game | null>(null);
   const [boardFen, setBoardFen] = useState("start");
-  const [statusMessage, setStatusMessage] = useState("Loading game...");
+  const [statusMessage, setStatusMessage] = useState<string>(
+    t.game.loadingGame
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [, setTick] = useState(0);
 
@@ -264,6 +271,10 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     () => canPlayerInteract(game, playerSide, isSubmitting),
     [game, playerSide, isSubmitting]
   );
+
+  const contentAlignClass = language === "fa" ? "text-right" : "text-left";
+  const actionsJustifyClass =
+    language === "fa" ? "justify-end" : "justify-start";
 
   const clearMoveHighlights = useCallback(() => {
     setSelectedSquare(null);
@@ -362,17 +373,17 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       const data: GameResponse = await response.json();
 
       if (!response.ok || !data.ok || !data.game) {
-        setStatusMessage(data.error ?? "Failed to load game");
+        setStatusMessage(data.error ?? t.game.failedToLoadGame);
         return;
       }
 
       setGame(data.game);
       setBoardFen(data.game.currentFen);
-      setStatusMessage(getStatusMessage(data.game));
+      setStatusMessage(getStatusMessage(data.game, t.game));
     } catch {
-      setStatusMessage("Failed to load game");
+      setStatusMessage(t.game.failedToLoadGame);
     }
-  }, [gameId]);
+  }, [gameId, t.game]);
 
   const tryJoinGame = useCallback(async () => {
     if (!token) return;
@@ -389,18 +400,18 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       const data: ActionResponse = await response.json();
 
       if (!response.ok || !data.ok || !data.game) {
-        setStatusMessage(data.error ?? "Failed to join game");
+        setStatusMessage(data.error ?? t.game.failedToJoinGame);
         return;
       }
 
       setGame(data.game);
       setBoardFen(data.game.currentFen);
-      setStatusMessage(getStatusMessage(data.game));
+      setStatusMessage(getStatusMessage(data.game, t.game));
     } catch (error) {
       console.error("join failed", error);
-      setStatusMessage("Failed to join game");
+      setStatusMessage(t.game.failedToJoinGame);
     }
-  }, [gameId, token]);
+  }, [gameId, token, t.game]);
 
   const updatePresence = useCallback(
     async (connected: boolean) => {
@@ -422,7 +433,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
         if (response.ok && data.ok && data.game) {
           setGame(data.game);
           setBoardFen(data.game.currentFen);
-          setStatusMessage(getStatusMessage(data.game));
+          setStatusMessage(getStatusMessage(data.game, t.game));
           return;
         }
 
@@ -431,7 +442,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
         await loadGame();
       }
     },
-    [playerSide, gameId, loadGame]
+    [playerSide, gameId, loadGame, t.game]
   );
 
   const showLegalMovesForSquare = useCallback(
@@ -485,13 +496,13 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     for (const move of highlightedMoves) {
       styles[move.square] = move.isCapture
         ? {
-          backgroundColor: "rgba(34, 197, 94, 0.18)",
-          boxShadow: "inset 0 0 0 4px rgba(34, 197, 94, 0.85)",
-        }
+            backgroundColor: "rgba(34, 197, 94, 0.18)",
+            boxShadow: "inset 0 0 0 4px rgba(34, 197, 94, 0.85)",
+          }
         : {
-          background:
-            "radial-gradient(circle, rgba(34, 197, 94, 0.45) 20%, transparent 22%)",
-        };
+            background:
+              "radial-gradient(circle, rgba(34, 197, 94, 0.45) 20%, transparent 22%)",
+          };
     }
 
     return styles;
@@ -499,13 +510,11 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
 
   useEffect(() => {
     try {
-      const saved = window.localStorage.getItem(
-        "online-chess-sound-enabled"
-      );
+      const saved = window.localStorage.getItem("online-chess-sound-enabled");
       if (saved !== null) {
         setSoundEnabled(saved === "true");
       }
-    } catch { }
+    } catch {}
   }, []);
 
   useEffect(() => {
@@ -514,7 +523,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
         "online-chess-sound-enabled",
         String(soundEnabled)
       );
-    } catch { }
+    } catch {}
   }, [soundEnabled]);
 
   useEffect(() => {
@@ -532,12 +541,12 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
         await loadGame();
       } catch (error) {
         console.error("initializePage failed", error);
-        setStatusMessage("Failed to initialize game");
+        setStatusMessage(t.game.failedToInitializeGame);
       }
     }
 
     void initializePage();
-  }, [gameId, token, tryJoinGame, loadGame]);
+  }, [gameId, token, tryJoinGame, loadGame, t.game]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -551,13 +560,14 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     const socket = getSocket();
 
     socket.emit("game:join", gameId);
+    void loadGame();
 
     const handleGameUpdated = (payload: { gameId: string; game: Game }) => {
       if (payload.gameId !== gameId) return;
 
       setGame(payload.game);
       setBoardFen(payload.game.currentFen);
-      setStatusMessage(getStatusMessage(payload.game));
+      setStatusMessage(getStatusMessage(payload.game, t.game));
       setIsSubmitting(false);
     };
 
@@ -567,7 +577,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       socket.emit("game:leave", gameId);
       socket.off("game:updated", handleGameUpdated);
     };
-  }, [gameId]);
+  }, [gameId, loadGame, t.game]);
 
   useEffect(() => {
     if (!playerSide) return;
@@ -584,6 +594,30 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       void updatePresence(false);
     };
   }, [playerSide, gameId, updatePresence]);
+
+  useEffect(() => {
+    if (!game || game.status !== "waiting") return;
+
+    const interval = window.setInterval(() => {
+      void loadGame();
+    }, 2000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [game, loadGame]);
+
+  useEffect(() => {
+    if (!playerSide) return;
+
+    const interval = window.setInterval(() => {
+      void updatePresence(true);
+    }, 5000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [playerSide, updatePresence]);
 
   useEffect(() => {
     clearMoveHighlights();
@@ -626,10 +660,15 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       audioContextRef.current = null;
 
       if (context) {
-        void context.close().catch(() => { });
+        void context.close().catch(() => {});
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!game) return;
+    setStatusMessage(getStatusMessage(game, t.game));
+  }, [language, game, t.game]);
 
   const submitMove = useCallback(
     async (from: string, to: string) => {
@@ -650,21 +689,84 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
 
         if (!response.ok || !data.ok || !data.game) {
           await loadGame();
-          setStatusMessage(data.error ?? "Move failed");
+          setStatusMessage(data.error ?? t.game.moveFailed);
           return;
         }
 
         setGame(data.game);
         setBoardFen(data.game.currentFen);
-        setStatusMessage(getStatusMessage(data.game));
+        setStatusMessage(getStatusMessage(data.game, t.game));
       } catch {
         await loadGame();
-        setStatusMessage("Move failed");
+        setStatusMessage(t.game.moveFailed);
       } finally {
         setIsSubmitting(false);
       }
     },
-    [gameId, loadGame]
+    [gameId, loadGame, t.game]
+  );
+
+  const attemptMove = useCallback(
+    (sourceSquare: string, targetSquare: string) => {
+      if (!game || isSubmitting) return false;
+
+      if (!playerSide) {
+        setStatusMessage(t.game.spectatorsCannotMove);
+        return false;
+      }
+
+      if (game.status !== "active") {
+        setStatusMessage(t.game.gameNotStarted);
+        return false;
+      }
+
+      const currentTurn = getTurnFromFen(game.currentFen);
+
+      if (currentTurn !== playerSide) {
+        setStatusMessage(t.game.notYourTurn);
+        return false;
+      }
+
+      const piece = getPieceAtSquare(game.currentFen, sourceSquare);
+
+      if (!piece) {
+        setStatusMessage(t.game.noPieceOnSquare);
+        return false;
+      }
+
+      if (!isPieceOfSide(piece, playerSide)) {
+        setStatusMessage(t.game.moveYourOwnPiece);
+        return false;
+      }
+
+      const chess = new Chess(game.currentFen);
+
+      let move;
+      try {
+        move = chess.move({
+          from: sourceSquare,
+          to: targetSquare,
+          promotion: "q",
+        });
+      } catch {
+        setStatusMessage(t.game.illegalMove);
+        return false;
+      }
+
+      if (!move) {
+        setStatusMessage(t.game.illegalMove);
+        return false;
+      }
+
+      clearMoveHighlights();
+      setIsSubmitting(true);
+      setBoardFen(chess.fen());
+      setStatusMessage(t.game.submittingMove);
+      void submitMove(sourceSquare, targetSquare);
+
+      return true;
+    },
+    [game, isSubmitting, playerSide, clearMoveHighlights, submitMove, t.game]
   );
 
   async function handleResign() {
@@ -686,15 +788,15 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       const data: ActionResponse = await response.json();
 
       if (!response.ok || !data.ok || !data.game) {
-        setStatusMessage(data.error ?? "Failed to resign");
+        setStatusMessage(data.error ?? t.game.failedToResign);
         return;
       }
 
       setGame(data.game);
       setBoardFen(data.game.currentFen);
-      setStatusMessage(getStatusMessage(data.game));
+      setStatusMessage(getStatusMessage(data.game, t.game));
     } catch {
-      setStatusMessage("Failed to resign");
+      setStatusMessage(t.game.failedToResign);
     }
   }
 
@@ -717,80 +819,17 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       const data: ActionResponse = await response.json();
 
       if (!response.ok || !data.ok || !data.game) {
-        setStatusMessage(data.error ?? "Failed to abort");
+        setStatusMessage(data.error ?? t.game.failedToAbort);
         return;
       }
 
       setGame(data.game);
       setBoardFen(data.game.currentFen);
-      setStatusMessage(getStatusMessage(data.game));
+      setStatusMessage(getStatusMessage(data.game, t.game));
     } catch {
-      setStatusMessage("Failed to abort");
+      setStatusMessage(t.game.failedToAbort);
     }
   }
-
-  const attemptMove = useCallback(
-    (sourceSquare: string, targetSquare: string) => {
-      if (!game || isSubmitting) return false;
-
-      if (!playerSide) {
-        setStatusMessage("Spectators cannot move pieces");
-        return false;
-      }
-
-      if (game.status !== "active") {
-        setStatusMessage("Game has not started yet");
-        return false;
-      }
-
-      const currentTurn = getTurnFromFen(game.currentFen);
-
-      if (currentTurn !== playerSide) {
-        setStatusMessage("It is not your turn");
-        return false;
-      }
-
-      const piece = getPieceAtSquare(game.currentFen, sourceSquare);
-
-      if (!piece) {
-        setStatusMessage("No piece on that square");
-        return false;
-      }
-
-      if (!isPieceOfSide(piece, playerSide)) {
-        setStatusMessage("You can only move your own pieces");
-        return false;
-      }
-
-      const chess = new Chess(game.currentFen);
-
-      let move;
-      try {
-        move = chess.move({
-          from: sourceSquare,
-          to: targetSquare,
-          promotion: "q",
-        });
-      } catch {
-        setStatusMessage("Illegal move");
-        return false;
-      }
-
-      if (!move) {
-        setStatusMessage("Illegal move");
-        return false;
-      }
-
-      clearMoveHighlights();
-      setIsSubmitting(true);
-      setBoardFen(chess.fen());
-      setStatusMessage("Submitting move...");
-      void submitMove(sourceSquare, targetSquare);
-
-      return true;
-    },
-    [game, isSubmitting, playerSide, clearMoveHighlights, submitMove]
-  );
 
   function onPieceDrop(sourceSquare: string, targetSquare: string) {
     void ensureAudioContext();
@@ -839,8 +878,25 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4">
       <div className="rounded-2xl border bg-white p-4 shadow-sm">
-        <h1 className="text-2xl font-bold">Online Chess IR</h1>
-        <p className="mt-1 text-sm text-gray-600">Live database-backed game</p>
+        <div className="flex items-center justify-between gap-4">
+          <Link
+            href="/"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border bg-gray-50 text-xl hover:bg-gray-100"
+            aria-label={
+              language === "fa" ? "بازگشت به صفحه اصلی" : "Go to home page"
+            }
+            title={language === "fa" ? "صفحه اصلی" : "Home"}
+          >
+            ♟
+          </Link>
+
+          <div className={`flex-1 ${contentAlignClass}`}>
+            <Link href="/" className="inline-block hover:opacity-80">
+              <h1 className="text-2xl font-bold">{t.game.title}</h1>
+              <p className="mt-1 text-sm text-gray-600">{t.game.subtitle}</p>
+            </Link>
+          </div>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-[1fr_320px]">
@@ -857,77 +913,93 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
           />
         </div>
 
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <h2 className="text-lg font-semibold">Game Info</h2>
+        <div
+          className={`rounded-2xl border bg-white p-4 shadow-sm ${contentAlignClass}`}
+        >
+          <h2 className="text-lg font-semibold">{t.game.gameInfo}</h2>
 
           <div className="mt-4 space-y-2 text-sm text-gray-700">
             <p>
-              <span className="font-semibold">Logged in as:</span>{" "}
-              {currentUser?.username ?? "Guest"}
+              <span className="font-semibold">{t.game.loggedInAs}:</span>{" "}
+              {currentUser?.username ?? t.common.guest}
             </p>
             <p>
-              <span className="font-semibold">You are:</span>{" "}
-              {getSideLabel(playerSide)}
+              <span className="font-semibold">{t.game.youAre}:</span>{" "}
+              {getSideLabel(playerSide, t.game)}
             </p>
             <p>
-              <span className="font-semibold">White:</span>{" "}
-              {game?.whitePlayer?.username ?? "Waiting..."}
+              <span className="font-semibold">{t.game.white}:</span>{" "}
+              {game?.whitePlayer?.username ?? t.game.waiting}
             </p>
             <p>
-              <span className="font-semibold">Black:</span>{" "}
-              {game?.blackPlayer?.username ?? "Waiting..."}
+              <span className="font-semibold">{t.game.black}:</span>{" "}
+              {game?.blackPlayer?.username ?? t.game.waiting}
             </p>
             <p>
-              <span className="font-semibold">White connected:</span>{" "}
-              {game ? (game.whiteConnected ? "Yes" : "No") : "..."}
+              <span className="font-semibold">{t.game.whiteConnected}:</span>{" "}
+              {game ? (game.whiteConnected ? t.common.yes : t.common.no) : "..."}
             </p>
             <p>
-              <span className="font-semibold">Black connected:</span>{" "}
-              {game ? (game.blackConnected ? "Yes" : "No") : "..."}
+              <span className="font-semibold">{t.game.blackConnected}:</span>{" "}
+              {game ? (game.blackConnected ? t.common.yes : t.common.no) : "..."}
             </p>
             <p>
-              <span className="font-semibold">White clock:</span>{" "}
+              <span className="font-semibold">{t.game.whiteClock}:</span>{" "}
               {game ? formatClock(getLiveClockMs(game, "white")) : "..."}
             </p>
             <p>
-              <span className="font-semibold">Black clock:</span>{" "}
+              <span className="font-semibold">{t.game.blackClock}:</span>{" "}
               {game ? formatClock(getLiveClockMs(game, "black")) : "..."}
             </p>
-            <div className="flex items-center justify-between">
+
+            <div
+              className={`flex items-center gap-3 ${
+                language === "fa" ? "justify-end" : "justify-between"
+              }`}
+            >
               <span className="text-sm">
-                <span className="font-semibold">Sound:</span>{" "}
-                {soundEnabled ? "On" : "Off"}
+                <span className="font-semibold">{t.game.sound}:</span>{" "}
+                {soundEnabled ? t.common.on : t.common.off}
               </span>
 
               <button
                 type="button"
+                dir="ltr"
                 onClick={handleToggleSound}
                 aria-pressed={soundEnabled}
-                aria-label={soundEnabled ? "Turn sound off" : "Turn sound on"}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${soundEnabled ? "bg-blue-600" : "bg-gray-300"
-                  }`}
+                aria-label={
+                  soundEnabled
+                    ? `${t.game.sound} ${t.common.off}`
+                    : `${t.game.sound} ${t.common.on}`
+                }
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                  soundEnabled ? "bg-blue-600" : "bg-gray-300"
+                }`}
               >
                 <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${soundEnabled ? "translate-x-6" : "translate-x-1"
-                    }`}
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    soundEnabled ? "translate-x-6" : "translate-x-1"
+                  }`}
                 />
               </button>
             </div>
+
             <p>
-              <span className="font-semibold">Status:</span> {statusMessage}
+              <span className="font-semibold">{t.game.status}:</span>{" "}
+              {statusMessage}
             </p>
             <p>
-              <span className="font-semibold">Game ID:</span> {gameId}
+              <span className="font-semibold">{t.game.gameId}:</span> {gameId}
             </p>
           </div>
 
-          <div className="mt-4 flex flex-col gap-2">
+          <div className={`mt-4 flex flex-col gap-2 ${actionsJustifyClass}`}>
             <button
               onClick={handleResign}
               disabled={!playerSide || game?.status === "finished"}
               className="rounded-xl bg-red-600 px-4 py-2 text-white disabled:opacity-50"
             >
-              Resign
+              {t.game.resign}
             </button>
 
             <button
@@ -939,27 +1011,24 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
               }
               className="rounded-xl bg-gray-700 px-4 py-2 text-white disabled:opacity-50"
             >
-              Abort
+              {t.game.abort}
             </button>
           </div>
 
           <div className="mt-4 rounded-xl bg-gray-100 p-3 text-sm">
-            <p className="font-semibold">Seat assignment</p>
-            <p className="mt-2">
-              The creator gets a random color. The invite link lets another
-              logged-in player claim the open seat.
-            </p>
+            <p className="font-semibold">{t.game.seatAssignment}</p>
+            <p className="mt-2">{t.game.seatAssignmentText}</p>
           </div>
 
           <div className="mt-6">
-            <h3 className="font-semibold">PGN</h3>
+            <h3 className="font-semibold">{t.game.pgn}</h3>
             <pre className="mt-2 whitespace-pre-wrap break-words rounded-xl bg-gray-100 p-3 text-xs">
-              {game?.pgn ?? "Loading..."}
+              {game?.pgn ?? t.common.loading}
             </pre>
           </div>
 
           <div className="mt-6">
-            <h3 className="font-semibold">Moves</h3>
+            <h3 className="font-semibold">{t.game.moves}</h3>
             <div className="mt-2 max-h-64 overflow-auto rounded-xl bg-gray-100 p-3 text-sm">
               {game?.moves?.length ? (
                 <ol className="space-y-1">
@@ -970,7 +1039,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
                   ))}
                 </ol>
               ) : (
-                <p>No moves yet.</p>
+                <p>{t.game.noMovesYet}</p>
               )}
             </div>
           </div>

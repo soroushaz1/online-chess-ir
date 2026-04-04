@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { SiteHeader } from "@/components/SiteHeader";
+import { LanguageProvider } from "@/components/LanguageProvider";
+import LanguageToggle from "@/components/LanguageToggle";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,15 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://playonlinechess.ir"),
-  title: {
-    default: "Online Chess IR",
-    template: "%s | Online Chess IR",
-  },
-  description: "Online chess for Iranian players.",
-  icons: {
-    icon: "/brand-icon.svg",
-  },
+  title: "Online Chess IR",
+  description: "Online chess platform for Iranian players",
 };
 
 export default function RootLayout({
@@ -31,15 +25,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full bg-gray-50 text-black">
-        <div className="flex min-h-screen flex-col">
-          <SiteHeader />
-          <div className="flex-1">{children}</div>
-        </div>
+    <html lang="fa" dir="rtl">
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+      >
+        <LanguageProvider>
+          <div className="fixed top-4 right-4 z-50">
+            <LanguageToggle />
+          </div>
+
+          {children}
+        </LanguageProvider>
       </body>
     </html>
   );

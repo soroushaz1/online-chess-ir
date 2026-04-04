@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { useI18n } from "@/components/LanguageProvider";
 
 type CurrentUser = {
   id: string;
@@ -45,34 +46,34 @@ type CreateGameResponse = {
   };
 };
 
+type CreatedGameInfo = {
+  gameId: string;
+  creatorSide: "white" | "black";
+  yourGame: string;
+  invite: string;
+  spectator: string;
+};
+
 export default function HomePage() {
+  const { t, language } = useI18n();
+
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState("");
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
-  const [gameInfo, setGameInfo] = useState<null | {
-    gameId: string;
-    creatorSide: "white" | "black";
-    yourGame: string;
-    invite: string;
-    spectator: string;
-  }>(null);
+  const [gameInfo, setGameInfo] = useState<CreatedGameInfo | null>(null);
 
   const wasSearchingRef = useRef(false);
 
-  const origin =
-    typeof window !== "undefined" ? window.location.origin : "";
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
 
   useEffect(() => {
     async function loadUser() {
       try {
         const response = await fetch("/api/auth/me", { cache: "no-store" });
         const data: MeResponse = await response.json();
-
-        console.log("me response", data);
-
         setUser(data.user);
       } catch (err) {
         console.error("failed to load current user", err);
@@ -91,14 +92,12 @@ export default function HomePage() {
       const response = await fetch("/api/matchmaking/status", {
         cache: "no-store",
       });
-      const data: MatchmakingStatusResponse = await response.json();
 
-      // console.log("matchmaking status", data);
+      const data: MatchmakingStatusResponse = await response.json();
 
       if (data.hasActiveGame && data.activeGameId) {
         setActiveGameId(data.activeGameId);
 
-        // Auto-redirect only if this user was actively searching
         if (wasSearchingRef.current) {
           window.location.href = `/game/${data.activeGameId}`;
           return;
@@ -116,6 +115,7 @@ export default function HomePage() {
     }
 
     void checkStatus();
+
     const interval = window.setInterval(checkStatus, 2000);
 
     return () => {
@@ -135,8 +135,6 @@ export default function HomePage() {
 
       const data: CreateGameResponse = await response.json();
 
-      console.log("create game response", data);
-
       if (
         !response.ok ||
         !data.ok ||
@@ -144,7 +142,7 @@ export default function HomePage() {
         !data.creatorSide ||
         !data.game
       ) {
-        setError(data.error ?? "Failed to create game");
+        setError(data.error ?? t.home.createGameFailed);
         return;
       }
 
@@ -157,7 +155,7 @@ export default function HomePage() {
       });
     } catch (err) {
       console.error("failed to create game", err);
-      setError("Failed to create game");
+      setError(t.home.createGameFailed);
     } finally {
       setIsCreating(false);
     }
@@ -175,11 +173,9 @@ export default function HomePage() {
 
       const data: MatchmakingJoinResponse = await response.json();
 
-      // console.log("matchmaking join response", data);
-
       if (!response.ok || !data.ok) {
         wasSearchingRef.current = false;
-        setError(data.error ?? "Failed to join matchmaking");
+        setError(data.error ?? t.home.joinMatchmakingFailed);
         return;
       }
 
@@ -192,7 +188,7 @@ export default function HomePage() {
     } catch (err) {
       wasSearchingRef.current = false;
       console.error("failed to join matchmaking", err);
-      setError("Failed to join matchmaking");
+      setError(t.home.joinMatchmakingFailed);
     }
   }
 
@@ -201,158 +197,178 @@ export default function HomePage() {
       await fetch("/api/matchmaking/leave", {
         method: "POST",
       });
+
       setIsSearching(false);
       wasSearchingRef.current = false;
     } catch (err) {
       console.error("failed to leave matchmaking", err);
-      setError("Failed to leave matchmaking");
+      setError(t.home.leaveMatchmakingFailed);
     }
   }
 
   async function handleLogout() {
     try {
-      const response = await fetch("/api/auth/logout", {
+      await fetch("/api/auth/logout", {
         method: "POST",
       });
-
-      if (!response.ok) {
-        setError("Failed to log out");
-        return;
-      }
 
       window.location.href = "/";
     } catch (err) {
       console.error("failed to log out", err);
-      setError("Failed to log out");
     }
   }
 
-  return (
-    <main className="mx-auto flex w-full max-w-3xl flex-col items-center justify-center gap-6 p-6 py-10">
-      <div className="w-full rounded-2xl border bg-white p-8 shadow-sm">
-        <h1 className="text-4xl font-bold">Online Chess IR</h1>
-        <p className="mt-3 text-gray-600">
-          Multiplayer chess for Iranian players.
-        </p>
+  const assignedSideLabel =
+    gameInfo?.creatorSide === "white" ? t.home.white : t.home.black;
 
-        <div className="mt-6 space-y-4">
+  return (
+    <main className="mx-auto flex min-h-screen w-full max-w-5xl items-start justify-center p-4 pt-24">
+      <div className="w-full max-w-2xl rounded-2xl border bg-white p-6 shadow-sm">
+        <div className={language === "fa" ? "text-right" : "text-left"}>
+          <h1 className="text-4xl font-bold">{t.home.title}</h1>
+          <p className="mt-2 text-gray-600">{t.home.subtitle}</p>
+        </div>
+
+        <div
+          className={`mt-6 space-y-3 text-sm text-gray-700 ${
+            language === "fa" ? "text-right" : "text-left"
+          }`}
+        >
           {loadingUser ? (
-            <p>Loading...</p>
+            <p>{t.common.loading}</p>
           ) : user ? (
             <>
-              <p className="text-sm text-gray-700">
-                Logged in as <span className="font-semibold">{user.username}</span>
-              </p>
-              <p className="text-sm text-gray-700">
-                Rating: <span className="font-semibold">{user.rating}</span>
+              <p>
+                <span className="font-semibold">{t.home.loggedInAs}:</span>{" "}
+                {user.username}
               </p>
 
-              <div className="flex flex-wrap gap-3">
+              <p>
+                <span className="font-semibold">{t.home.rating}:</span>{" "}
+                {user.rating}
+              </p>
+
+              <div
+                className={`mt-4 flex flex-wrap gap-3 ${
+                  language === "fa" ? "justify-end" : "justify-start"
+                }`}
+              >
                 <button
                   onClick={handlePlayRated}
-                  disabled={isSearching || !!activeGameId}
-                  className="rounded-xl bg-black px-6 py-3 text-white disabled:opacity-50"
+                  disabled={isSearching}
+                  className="rounded-xl bg-black px-5 py-3 text-white disabled:opacity-50"
                 >
-                  {isSearching ? "Searching..." : "Play Rated 10+0"}
+                  {isSearching ? t.home.searching : t.home.playRated}
                 </button>
 
                 {isSearching ? (
                   <button
                     onClick={handleCancelSearch}
-                    className="rounded-xl border px-6 py-3"
+                    className="rounded-xl border px-5 py-3"
                   >
-                    Cancel Search
+                    {t.home.cancelSearch}
                   </button>
                 ) : null}
 
                 <button
                   onClick={handleCreateGame}
-                  disabled={isCreating || isSearching || !!activeGameId}
-                  className="rounded-xl border px-6 py-3 disabled:opacity-50"
+                  disabled={isCreating}
+                  className="rounded-xl border px-5 py-3 disabled:opacity-50"
                 >
-                  {isCreating ? "Creating..." : "Create Private Game"}
+                  {isCreating ? t.common.loading : t.home.createPrivateGame}
                 </button>
 
                 <button
                   onClick={handleLogout}
-                  className="rounded-xl border px-6 py-3"
+                  className="rounded-xl border px-5 py-3"
                 >
-                  Log out
+                  {t.home.logout}
                 </button>
               </div>
             </>
           ) : (
-            <Link
-              href="/auth/phone"
-              className="inline-block rounded-xl bg-black px-6 py-3 text-white"
-            >
-              Sign in with phone
-            </Link>
+            <div className={language === "fa" ? "text-right" : "text-left"}>
+              <Link
+                href="/auth/phone"
+                className="inline-flex rounded-xl bg-black px-5 py-3 text-white"
+              >
+                {t.home.signInWithPhone}
+              </Link>
+            </div>
           )}
-        </div>
 
-        {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}
+          {error ? (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-red-700">
+              {error}
+            </div>
+          ) : null}
 
-        {activeGameId && !isSearching ? (
-          <div className="mt-6 rounded-xl bg-gray-100 p-4 text-sm">
-            <p className="font-semibold">You already have an ongoing game</p>
-            <a
-              className="mt-2 inline-block break-all text-blue-600 underline"
-              href={`/game/${activeGameId}`}
-            >
-              Resume current game
-            </a>
-          </div>
-        ) : null}
+          {activeGameId && !isSearching ? (
+            <div className="rounded-xl bg-gray-100 p-4">
+              <p className="font-semibold">{t.home.ongoingGame}</p>
 
-        {gameInfo ? (
-          <div className="mt-6 rounded-2xl bg-gray-100 p-4 text-sm">
-            <p className="font-semibold">
-              You were assigned: {gameInfo.creatorSide === "white" ? "White" : "Black"}
-            </p>
-
-            <p className="mt-2 break-all text-xs text-gray-600">
-              Game ID: {gameInfo.gameId}
-            </p>
-
-            <div className="mt-4 space-y-3">
-              <div>
-                <p className="font-medium">Your game link</p>
-                <a
-                  className="break-all text-blue-600 underline"
-                  href={origin + gameInfo.yourGame}
+              <div className="mt-3">
+                <Link
+                  href={`/game/${activeGameId}`}
+                  className="text-blue-600 underline"
                 >
-                  {origin + gameInfo.yourGame}
-                </a>
-              </div>
-
-              <div>
-                <p className="font-medium">Invite link for opponent</p>
-                <a
-                  className="break-all text-blue-600 underline"
-                  href={origin + gameInfo.invite}
-                >
-                  {origin + gameInfo.invite}
-                </a>
-              </div>
-
-              <div>
-                <p className="font-medium">Spectator link</p>
-                <a
-                  className="break-all text-blue-600 underline"
-                  href={origin + gameInfo.spectator}
-                >
-                  {origin + gameInfo.spectator}
-                </a>
+                  {t.home.resumeCurrentGame}
+                </Link>
               </div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        <div className="mt-6">
-          <Link href="/games" className="text-blue-600 underline">
-            View game history
-          </Link>
+          {gameInfo ? (
+            <div className="rounded-xl bg-gray-100 p-4">
+              <p>
+                <span className="font-semibold">{t.home.assignedSide}:</span>{" "}
+                {assignedSideLabel}
+              </p>
+
+              <p className="mt-2">
+                <span className="font-semibold">{t.home.gameId}:</span>{" "}
+                {gameInfo.gameId}
+              </p>
+
+              <div className="mt-4 space-y-3 break-all">
+                <div>
+                  <p className="font-semibold">{t.home.yourGameLink}</p>
+                  <a
+                    href={origin + gameInfo.yourGame}
+                    className="text-blue-600 underline"
+                  >
+                    {origin + gameInfo.yourGame}
+                  </a>
+                </div>
+
+                <div>
+                  <p className="font-semibold">{t.home.inviteLink}</p>
+                  <a
+                    href={origin + gameInfo.invite}
+                    className="text-blue-600 underline"
+                  >
+                    {origin + gameInfo.invite}
+                  </a>
+                </div>
+
+                <div>
+                  <p className="font-semibold">{t.home.spectatorLink}</p>
+                  <a
+                    href={origin + gameInfo.spectator}
+                    className="text-blue-600 underline"
+                  >
+                    {origin + gameInfo.spectator}
+                  </a>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          <div className={language === "fa" ? "text-right" : "text-left"}>
+            <Link href="/games" className="text-blue-600 underline">
+              {t.home.viewGameHistory}
+            </Link>
+          </div>
         </div>
       </div>
     </main>

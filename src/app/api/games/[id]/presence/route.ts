@@ -17,6 +17,35 @@ function getPlayerSide(
   return null;
 }
 
+const gameInclude = {
+  whitePlayer: {
+    select: { id: true, username: true, phoneNumber: true },
+  },
+  blackPlayer: {
+    select: { id: true, username: true, phoneNumber: true },
+  },
+  moves: {
+    orderBy: { moveNumber: "asc" as const },
+  },
+};
+
+function emitGameUpdated(id: string, game: unknown) {
+  const io = (globalThis as typeof globalThis & {
+    io?: {
+      to: (room: string) => {
+        emit: (event: string, payload: unknown) => void;
+      };
+    };
+  }).io;
+
+  if (io) {
+    io.to(`game:${id}`).emit("game:updated", {
+      gameId: id,
+      game,
+    });
+  }
+}
+
 export async function POST(request: NextRequest, { params }: Params) {
   const { id } = await params;
   const currentUser = await getCurrentUser();
@@ -42,17 +71,7 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   const game = await prisma.game.findUnique({
     where: { id },
-    include: {
-      whitePlayer: {
-        select: { id: true, username: true, phoneNumber: true },
-      },
-      blackPlayer: {
-        select: { id: true, username: true, phoneNumber: true },
-      },
-      moves: {
-        orderBy: { moveNumber: "asc" },
-      },
-    },
+    include: gameInclude,
   });
 
   if (!game) {
@@ -90,35 +109,14 @@ export async function POST(request: NextRequest, { params }: Params) {
       whiteConnected: nextWhiteConnected,
       blackConnected: nextBlackConnected,
       status: shouldActivate ? "active" : game.status,
-      turnStartedAt: shouldActivate ? new Date() : game.turnStartedAt,
+      turnStartedAt: shouldActivate
+        ? game.turnStartedAt ?? new Date()
+        : game.turnStartedAt,
     },
-    include: {
-      whitePlayer: {
-        select: { id: true, username: true, phoneNumber: true },
-      },
-      blackPlayer: {
-        select: { id: true, username: true, phoneNumber: true },
-      },
-      moves: {
-        orderBy: { moveNumber: "asc" },
-      },
-    },
+    include: gameInclude,
   });
 
-  const io = (globalThis as typeof globalThis & {
-    io?: {
-      to: (room: string) => {
-        emit: (event: string, payload: unknown) => void;
-      };
-    };
-  }).io;
-
-  if (io) {
-    io.to(`game:${id}`).emit("game:updated", {
-      gameId: id,
-      game: updatedGame,
-    });
-  }
+  emitGameUpdated(id, updatedGame);
 
   return NextResponse.json({
     ok: true,
