@@ -44,6 +44,7 @@ type CurrentUser = {
 
 type Game = {
   id: string;
+  initialFen?: string;
   currentFen: string;
   pgn: string;
   status: string;
@@ -255,10 +256,12 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     []
   );
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [currentPly, setCurrentPly] = useState<number | null>(null);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const hasSeenInitialGameRef = useRef(false);
   const previousGameRef = useRef<Game | null>(null);
+  const hasInitializedReviewPlyRef = useRef(false);
 
   const playerSide = useMemo<Side | null>(() => {
     if (!game || !currentUser) return null;
@@ -275,6 +278,33 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
   const contentAlignClass = language === "fa" ? "text-right" : "text-left";
   const actionsJustifyClass =
     language === "fa" ? "justify-end" : "justify-start";
+
+  const isFinishedGame = game?.status === "finished";
+
+  const effectivePly = useMemo(() => {
+    if (!game || !isFinishedGame) return null;
+    return currentPly ?? game.moves.length;
+  }, [game, isFinishedGame, currentPly]);
+
+  const displayFen = useMemo(() => {
+    if (!game || !isFinishedGame || effectivePly === null) {
+      return boardFen;
+    }
+
+    if (effectivePly === 0) {
+      return game.initialFen ?? "start";
+    }
+
+    return game.moves[effectivePly - 1]?.fenAfter ?? game.currentFen;
+  }, [game, isFinishedGame, effectivePly, boardFen]);
+
+  const currentReviewMove = useMemo(() => {
+    if (!game || !isFinishedGame || effectivePly === null || effectivePly === 0) {
+      return null;
+    }
+
+    return game.moves[effectivePly - 1] ?? null;
+  }, [game, isFinishedGame, effectivePly]);
 
   const clearMoveHighlights = useCallback(() => {
     setSelectedSquare(null);
@@ -496,13 +526,13 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     for (const move of highlightedMoves) {
       styles[move.square] = move.isCapture
         ? {
-            backgroundColor: "rgba(34, 197, 94, 0.18)",
-            boxShadow: "inset 0 0 0 4px rgba(34, 197, 94, 0.85)",
-          }
+          backgroundColor: "rgba(34, 197, 94, 0.18)",
+          boxShadow: "inset 0 0 0 4px rgba(34, 197, 94, 0.85)",
+        }
         : {
-            background:
-              "radial-gradient(circle, rgba(34, 197, 94, 0.45) 20%, transparent 22%)",
-          };
+          background:
+            "radial-gradient(circle, rgba(34, 197, 94, 0.45) 20%, transparent 22%)",
+        };
     }
 
     return styles;
@@ -514,7 +544,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       if (saved !== null) {
         setSoundEnabled(saved === "true");
       }
-    } catch {}
+    } catch { }
   }, []);
 
   useEffect(() => {
@@ -523,7 +553,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
         "online-chess-sound-enabled",
         String(soundEnabled)
       );
-    } catch {}
+    } catch { }
   }, [soundEnabled]);
 
   useEffect(() => {
@@ -660,7 +690,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       audioContextRef.current = null;
 
       if (context) {
-        void context.close().catch(() => {});
+        void context.close().catch(() => { });
       }
     };
   }, []);
@@ -669,6 +699,38 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     if (!game) return;
     setStatusMessage(getStatusMessage(game, t.game));
   }, [language, game, t.game]);
+
+  useEffect(() => {
+    setCurrentPly(null);
+  }, [gameId]);
+
+  useEffect(() => {
+    if (!game) {
+      setCurrentPly(null);
+      return;
+    }
+
+    if (game.status !== "finished") {
+      setCurrentPly(null);
+      return;
+    }
+
+    setCurrentPly((prev) => prev ?? game.moves.length);
+  }, [game]);
+
+  useEffect(() => {
+    if (!isFinishedGame || effectivePly === null) {
+      hasInitializedReviewPlyRef.current = false;
+      return;
+    }
+
+    if (!hasInitializedReviewPlyRef.current) {
+      hasInitializedReviewPlyRef.current = true;
+      return;
+    }
+
+    void playSound("move");
+  }, [isFinishedGame, effectivePly, playSound]);
 
   const submitMove = useCallback(
     async (from: string, to: string) => {
@@ -875,6 +937,37 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     }
   }
 
+  async function handleCopyPgn() {
+    if (!game?.pgn) return;
+
+    try {
+      await navigator.clipboard.writeText(game.pgn);
+    } catch { }
+  }
+
+  function handleDownloadPgn() {
+    if (!game?.pgn) return;
+
+    const whiteName = game.whitePlayer?.username ?? t.game.white;
+    const blackName = game.blackPlayer?.username ?? t.game.black;
+
+    const safeWhite = whiteName.replace(/[^a-z0-9_-]+/gi, "-");
+    const safeBlack = blackName.replace(/[^a-z0-9_-]+/gi, "-");
+    const filename = `${safeWhite}-vs-${safeBlack}-${game.id}.pgn`;
+
+    const blob = new Blob([game.pgn], { type: "application/x-chess-pgn" });
+    const url = URL.createObjectURL(blob);
+
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4">
       <div className="rounded-2xl border bg-white p-4 shadow-sm">
@@ -901,22 +994,100 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
 
       <div className="grid gap-4 md:grid-cols-[1fr_320px]">
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <Chessboard
-            id="online-game-board"
-            position={boardFen}
-            onPieceDrop={onPieceDrop}
-            onSquareClick={handleSquareClick}
-            onPieceDragBegin={handlePieceDragBegin}
-            customSquareStyles={moveHighlightStyles}
-            arePiecesDraggable={boardIsInteractive}
-            boardOrientation={playerSide ?? "white"}
-          />
+          <div
+            dir="ltr"
+            style={{ direction: "ltr" }}
+            className="w-full [unicode-bidi:embed]"
+          >
+            <Chessboard
+              id="online-game-board"
+              position={displayFen}
+              onPieceDrop={onPieceDrop}
+              onSquareClick={handleSquareClick}
+              onPieceDragBegin={handlePieceDragBegin}
+              customSquareStyles={moveHighlightStyles}
+              arePiecesDraggable={boardIsInteractive}
+              boardOrientation={playerSide ?? "white"}
+            />
+          </div>
+
+          {isFinishedGame ? (
+            <div className="mt-4 space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void ensureAudioContext();
+                    setCurrentPly(0);
+                  }}
+                  disabled={effectivePly === 0}
+                  className="rounded-xl border px-4 py-2 disabled:opacity-50"
+                >
+                  {t.review.first}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    void ensureAudioContext();
+                    setCurrentPly((value) =>
+                      Math.max(0, (value ?? game.moves.length) - 1)
+                    );
+                  }}
+                  disabled={effectivePly === 0}
+                  className="rounded-xl border px-4 py-2 disabled:opacity-50"
+                >
+                  {t.review.previous}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    void ensureAudioContext();
+                    setCurrentPly((value) =>
+                      Math.min(game.moves.length, (value ?? game.moves.length) + 1)
+                    );
+                  }}
+                  disabled={effectivePly === game.moves.length}
+                  className="rounded-xl border px-4 py-2 disabled:opacity-50"
+                >
+                  {t.review.next}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    void ensureAudioContext();
+                    setCurrentPly(game.moves.length);
+                  }}
+                  disabled={effectivePly === game.moves.length}
+                  className="rounded-xl border px-4 py-2 disabled:opacity-50"
+                >
+                  {t.review.last}
+                </button>
+              </div>
+
+              <div className="rounded-xl bg-gray-100 p-3 text-sm text-gray-700">
+                <p>
+                  <span className="font-semibold">{t.review.move}:</span>{" "}
+                  {effectivePly === 0
+                    ? t.review.startPosition
+                    : `${effectivePly}. ${currentReviewMove?.san ?? ""}`}
+                </p>
+                <p className="mt-1 break-all">
+                  <span className="font-semibold">FEN:</span> {displayFen}
+                </p>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div
           className={`rounded-2xl border bg-white p-4 shadow-sm ${contentAlignClass}`}
         >
-          <h2 className="text-lg font-semibold">{t.game.gameInfo}</h2>
+          <h2 className="text-lg font-semibold">
+            {isFinishedGame ? t.review.title : t.game.gameInfo}
+          </h2>
 
           <div className="mt-4 space-y-2 text-sm text-gray-700">
             <p>
@@ -953,9 +1124,8 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
             </p>
 
             <div
-              className={`flex items-center gap-3 ${
-                language === "fa" ? "justify-end" : "justify-between"
-              }`}
+              className={`flex items-center gap-3 ${language === "fa" ? "justify-end" : "justify-between"
+                }`}
             >
               <span className="text-sm">
                 <span className="font-semibold">{t.game.sound}:</span>{" "}
@@ -972,14 +1142,12 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
                     ? `${t.game.sound} ${t.common.off}`
                     : `${t.game.sound} ${t.common.on}`
                 }
-                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-                  soundEnabled ? "bg-blue-600" : "bg-gray-300"
-                }`}
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${soundEnabled ? "bg-blue-600" : "bg-gray-300"
+                  }`}
               >
                 <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    soundEnabled ? "translate-x-6" : "translate-x-1"
-                  }`}
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${soundEnabled ? "translate-x-6" : "translate-x-1"
+                    }`}
                 />
               </button>
             </div>
@@ -993,32 +1161,65 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
             </p>
           </div>
 
-          <div className={`mt-4 flex flex-col gap-2 ${actionsJustifyClass}`}>
-            <button
-              onClick={handleResign}
-              disabled={!playerSide || game?.status === "finished"}
-              className="rounded-xl bg-red-600 px-4 py-2 text-white disabled:opacity-50"
-            >
-              {t.game.resign}
-            </button>
+          {!isFinishedGame ? (
+            <>
+              <div className={`mt-4 flex flex-col gap-2 ${actionsJustifyClass}`}>
+                <button
+                  onClick={handleResign}
+                  disabled={!playerSide || game?.status === "finished"}
+                  className="rounded-xl bg-red-600 px-4 py-2 text-white disabled:opacity-50"
+                >
+                  {t.game.resign}
+                </button>
 
-            <button
-              onClick={handleAbort}
-              disabled={
-                !playerSide ||
-                game?.status === "finished" ||
-                (game ? hasSideMoved(game.moves, playerSide) : false)
-              }
-              className="rounded-xl bg-gray-700 px-4 py-2 text-white disabled:opacity-50"
-            >
-              {t.game.abort}
-            </button>
-          </div>
+                <button
+                  onClick={handleAbort}
+                  disabled={
+                    !playerSide ||
+                    game?.status === "finished" ||
+                    (game ? hasSideMoved(game.moves, playerSide) : false)
+                  }
+                  className="rounded-xl bg-gray-700 px-4 py-2 text-white disabled:opacity-50"
+                >
+                  {t.game.abort}
+                </button>
+              </div>
 
-          <div className="mt-4 rounded-xl bg-gray-100 p-3 text-sm">
-            <p className="font-semibold">{t.game.seatAssignment}</p>
-            <p className="mt-2">{t.game.seatAssignmentText}</p>
-          </div>
+              <div className="mt-4 rounded-xl bg-gray-100 p-3 text-sm">
+                <p className="font-semibold">{t.game.seatAssignment}</p>
+                <p className="mt-2">{t.game.seatAssignmentText}</p>
+              </div>
+            </>
+          ) : (
+            <div className="mt-4 space-y-3">
+              <div className={`flex flex-wrap gap-2 ${actionsJustifyClass}`}>
+                <button
+                  type="button"
+                  onClick={handleCopyPgn}
+                  disabled={!game?.pgn}
+                  className="rounded-xl border px-4 py-2 disabled:opacity-50"
+                >
+                  {t.review.copyPgn}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDownloadPgn}
+                  disabled={!game?.pgn}
+                  className="rounded-xl border px-4 py-2 disabled:opacity-50"
+                >
+                  {t.review.downloadPgn}
+                </button>
+
+                <Link
+                  href={`/games/${gameId}/review`}
+                  className="rounded-xl bg-blue-600 px-4 py-2 text-white"
+                >
+                  {t.review.analyze}
+                </Link>
+              </div>
+            </div>
+          )}
 
           <div className="mt-6">
             <h3 className="font-semibold">{t.game.pgn}</h3>
@@ -1028,15 +1229,33 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
           </div>
 
           <div className="mt-6">
-            <h3 className="font-semibold">{t.game.moves}</h3>
+            <h3 className="font-semibold">
+              {isFinishedGame ? t.review.moves : t.game.moves}
+            </h3>
             <div className="mt-2 max-h-64 overflow-auto rounded-xl bg-gray-100 p-3 text-sm">
               {game?.moves?.length ? (
                 <ol className="space-y-1">
-                  {game.moves.map((move) => (
-                    <li key={move.id}>
-                      {move.moveNumber}. {move.san} ({move.uci})
-                    </li>
-                  ))}
+                  {game.moves.map((move) => {
+                    const selected = effectivePly === move.moveNumber;
+
+                    return (
+                      <li key={move.id}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isFinishedGame) {
+                              void ensureAudioContext();
+                              setCurrentPly(move.moveNumber);
+                            }
+                          }}
+                          className={`rounded-lg px-2 py-1 ${selected ? "bg-black text-white" : "hover:bg-gray-200"
+                            }`}
+                        >
+                          {move.moveNumber}. {move.san} ({move.uci})
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ol>
               ) : (
                 <p>{t.game.noMovesYet}</p>

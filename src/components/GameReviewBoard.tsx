@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
+import { useI18n } from "@/components/LanguageProvider";
+import Link from "next/link";
 
 type Move = {
   id: string;
@@ -182,16 +184,28 @@ function getTagClasses(tag?: string | null) {
   return "bg-white hover:bg-gray-200";
 }
 
-function getAnalysisStatusText(status: string, error: string | null) {
-  if (status === "completed") return "Server analysis ready";
-  if (status === "running") return "Analyzing on server...";
-  if (status === "idle") return "Queued for server analysis";
-  if (status === "failed") return error ?? "Server analysis failed";
-  return "Waiting for analysis...";
+function getAnalysisStatusText(
+  status: string,
+  error: string | null,
+  tReview: {
+    ready: string;
+    analyzing: string;
+    queued: string;
+    failed: string;
+  }
+) {
+  if (status === "completed") return tReview.ready;
+  if (status === "running") return tReview.analyzing;
+  if (status === "idle") return tReview.queued;
+  if (status === "failed") return error ?? tReview.failed;
+  return tReview.queued;
 }
 
 export default function GameReviewBoard({ game }: { game: GameReview }) {
+  const { t, language } = useI18n();
+
   const [currentPly, setCurrentPly] = useState(game.moves.length);
+  const [analysisVisible, setAnalysisVisible] = useState(false);
   const [analysisStatus, setAnalysisStatus] = useState(game.analysisStatus);
   const [analysisError, setAnalysisError] = useState<string | null>(
     game.analysisError
@@ -203,67 +217,7 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
     game.analysisMoves ?? []
   );
 
-  const queueRequestedRef = useRef(false);
-
-  useEffect(() => {
-    if (game.status !== "finished") return;
-    if (analysisStatus !== "idle") return;
-    if (queueRequestedRef.current) return;
-
-    queueRequestedRef.current = true;
-
-    void fetch(`/api/games/${game.id}/analysis`, {
-      method: "POST",
-    }).catch(() => {
-      setAnalysisError("Failed to queue server analysis");
-    });
-  }, [game.id, game.status, analysisStatus]);
-
-  useEffect(() => {
-    if (game.status !== "finished") return;
-
-    let cancelled = false;
-
-    async function pollAnalysis() {
-      try {
-        const response = await fetch(`/api/games/${game.id}/analysis`, {
-          cache: "no-store",
-        });
-
-        const data: AnalysisResponse = await response.json();
-
-        if (!response.ok || !data.ok || !data.analysis || cancelled) {
-          return;
-        }
-
-        setAnalysisStatus(data.analysis.status);
-        setAnalysisError(data.analysis.error ?? null);
-        setAnalysisPositions(data.analysis.positions ?? []);
-        setAnalysisMoves(data.analysis.moves ?? []);
-      } catch {
-        if (!cancelled) {
-          setAnalysisError("Failed to load server analysis");
-        }
-      }
-    }
-
-    void pollAnalysis();
-
-    if (analysisStatus === "completed" || analysisStatus === "failed") {
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    const interval = setInterval(() => {
-      void pollAnalysis();
-    }, 2000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [game.id, game.status, analysisStatus]);
+  const contentAlignClass = language === "fa" ? "text-right" : "text-left";
 
   const currentFen =
     currentPly === 0 ? game.initialFen : game.moves[currentPly - 1].fenAfter;
@@ -288,8 +242,8 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
     return rows;
   }, [game.moves]);
 
-  const whiteName = game.whitePlayer?.username ?? "White";
-  const blackName = game.blackPlayer?.username ?? "Black";
+  const whiteName = game.whitePlayer?.username ?? t.game.white;
+  const blackName = game.blackPlayer?.username ?? t.game.black;
 
   const analysisByPly = useMemo(() => {
     return new Map(analysisPositions.map((item) => [item.ply, item]));
@@ -332,32 +286,106 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
 
   const blackBarPercent = 100 - whiteBarPercent;
 
-  function goToStart() {
-    setCurrentPly(0);
+  async function loadAnalysis() {
+    try {
+      const response = await fetch(`/api/games/${game.id}/analysis`, {
+        cache: "no-store",
+      });
+
+      const data: AnalysisResponse = await response.json();
+
+      if (!response.ok || !data.ok || !data.analysis) {
+        setAnalysisError(data.error ?? t.review.loadFailed);
+        return;
+      }
+
+      setAnalysisStatus(data.analysis.status);
+      setAnalysisError(data.analysis.error ?? null);
+      setAnalysisPositions(data.analysis.positions ?? []);
+      setAnalysisMoves(data.analysis.moves ?? []);
+    } catch {
+      setAnalysisError(t.review.loadFailed);
+    }
   }
 
-  function goToPrevious() {
-    setCurrentPly((value) => Math.max(0, value - 1));
+  async function handleToggleAnalysis() {
+    if (analysisVisible) {
+      setAnalysisVisible(false);
+      return;
+    }
+
+    setAnalysisVisible(true);
+
+    if (analysisStatus === "completed" || analysisStatus === "running") {
+      await loadAnalysis();
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/games/${game.id}/analysis`, {
+        method: "POST",
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        setAnalysisStatus("failed");
+        setAnalysisError(data.error ?? t.review.queueFailed);
+        return;
+      }
+
+      setAnalysisStatus("running");
+      setAnalysisError(null);
+      await loadAnalysis();
+    } catch {
+      setAnalysisStatus("failed");
+      setAnalysisError(t.review.queueFailed);
+    }
   }
 
-  function goToNext() {
-    setCurrentPly((value) => Math.min(game.moves.length, value + 1));
-  }
+  useEffect(() => {
+    if (!analysisVisible) return;
+    if (analysisStatus !== "running") return;
 
-  function goToEnd() {
-    setCurrentPly(game.moves.length);
-  }
+    let cancelled = false;
+
+    const interval = setInterval(async () => {
+      if (cancelled) return;
+
+      try {
+        const response = await fetch(`/api/games/${game.id}/analysis`, {
+          cache: "no-store",
+        });
+
+        const data: AnalysisResponse = await response.json();
+
+        if (!response.ok || !data.ok || !data.analysis || cancelled) {
+          return;
+        }
+
+        setAnalysisStatus(data.analysis.status);
+        setAnalysisError(data.analysis.error ?? null);
+        setAnalysisPositions(data.analysis.positions ?? []);
+        setAnalysisMoves(data.analysis.moves ?? []);
+      } catch {
+        if (!cancelled) {
+          setAnalysisError(t.review.loadFailed);
+        }
+      }
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [analysisVisible, analysisStatus, game.id, t.review]);
 
   async function handleCopyPgn() {
     if (!game.pgn) return;
 
     try {
       await navigator.clipboard.writeText(game.pgn);
-      alert("PGN copied");
-    } catch (error) {
-      console.error("Failed to copy PGN", error);
-      alert("Failed to copy PGN");
-    }
+    } catch { }
   }
 
   function handleDownloadPgn() {
@@ -381,15 +409,32 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4">
+    <div className={`mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 ${contentAlignClass}`}>
       <div className="rounded-2xl border bg-white p-4 shadow-sm">
-        <h1 className="text-2xl font-bold">Game Review</h1>
-        <p className="mt-1 text-sm text-gray-600">
-          {whiteName} vs {blackName}
-        </p>
-        <p className="mt-2 text-sm text-gray-700">
-          Result: {game.result ?? "Unknown"}
-        </p>
+        <div className="flex items-center justify-between gap-4">
+          <Link
+            href="/"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border bg-gray-50 text-xl hover:bg-gray-100"
+            aria-label={
+              language === "fa" ? "بازگشت به صفحه اصلی" : "Go to home page"
+            }
+            title={language === "fa" ? "صفحه اصلی" : "Home"}
+          >
+            ♟
+          </Link>
+
+          <div className={`flex-1 ${contentAlignClass}`}>
+            <Link href="/games" className="inline-block hover:opacity-80">
+              <h1 className="text-2xl font-bold">{t.review.title}</h1>
+              <p className="mt-1 text-sm text-gray-600">
+                {whiteName} vs {blackName}
+              </p>
+            </Link>
+            <p className="mt-2 text-sm text-gray-700">
+              {t.review.result}: {game.result ?? t.gamesHistory.unknown}
+            </p>
+          </div>
+        </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <button
@@ -397,7 +442,7 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
             disabled={!game.pgn}
             className="rounded-xl border px-4 py-2 disabled:opacity-50"
           >
-            Copy PGN
+            {t.review.copyPgn}
           </button>
 
           <button
@@ -405,11 +450,18 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
             disabled={!game.pgn}
             className="rounded-xl border px-4 py-2 disabled:opacity-50"
           >
-            Download PGN
+            {t.review.downloadPgn}
           </button>
 
-          <div className="ml-2 rounded-xl bg-gray-100 px-3 py-2 text-sm text-gray-700">
-            {getAnalysisStatusText(analysisStatus, analysisError)}
+          <button
+            onClick={handleToggleAnalysis}
+            className="rounded-xl bg-blue-600 px-4 py-2 text-white"
+          >
+            {analysisVisible ? t.review.hideAnalysis : t.review.analyze}
+          </button>
+
+          <div className="rounded-xl bg-gray-100 px-3 py-2 text-sm text-gray-700">
+            {getAnalysisStatusText(analysisStatus, analysisError, t.review)}
           </div>
         </div>
       </div>
@@ -431,97 +483,102 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
               </div>
             </div>
 
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 flex-1" dir="ltr">
               <Chessboard position={currentFen} arePiecesDraggable={false} />
             </div>
           </div>
 
           <div className="mt-4 flex flex-wrap gap-2">
             <button
-              onClick={goToStart}
+              onClick={() => setCurrentPly(0)}
               disabled={currentPly === 0}
               className="rounded-xl border px-4 py-2 disabled:opacity-50"
             >
-              {"<<"}
+              {t.review.first}
             </button>
 
             <button
-              onClick={goToPrevious}
+              onClick={() => setCurrentPly((value) => Math.max(0, value - 1))}
               disabled={currentPly === 0}
               className="rounded-xl border px-4 py-2 disabled:opacity-50"
             >
-              {"<"}
+              {t.review.previous}
             </button>
 
             <button
-              onClick={goToNext}
+              onClick={() =>
+                setCurrentPly((value) => Math.min(game.moves.length, value + 1))
+              }
               disabled={currentPly === game.moves.length}
               className="rounded-xl border px-4 py-2 disabled:opacity-50"
             >
-              {">"}
+              {t.review.next}
             </button>
 
             <button
-              onClick={goToEnd}
+              onClick={() => setCurrentPly(game.moves.length)}
               disabled={currentPly === game.moves.length}
               className="rounded-xl border px-4 py-2 disabled:opacity-50"
             >
-              {">>"}
+              {t.review.last}
             </button>
           </div>
 
           <div className="mt-4 rounded-xl bg-gray-100 p-3 text-sm text-gray-700">
             <p>
-              <span className="font-semibold">Move:</span>{" "}
+              <span className="font-semibold">{t.review.move}:</span>{" "}
               {currentPly === 0
-                ? "Start position"
-                : `${currentPly}. ${currentMove?.san}`}
+                ? t.review.startPosition
+                : `${currentPly}. ${currentMove?.san ?? ""}`}
             </p>
             <p className="mt-1 break-all">
               <span className="font-semibold">FEN:</span> {currentFen}
             </p>
           </div>
 
-          <div className="mt-4 rounded-xl bg-gray-100 p-3 text-sm text-gray-700">
-            <div className="flex items-center justify-between gap-3">
-              <p className="font-semibold">Stockfish</p>
-              <p className="text-xs text-gray-500">
-                {getAnalysisStatusText(analysisStatus, analysisError)}
-              </p>
-            </div>
+          {analysisVisible ? (
+            <div className="mt-4 rounded-xl bg-gray-100 p-3 text-sm text-gray-700">
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-semibold">{t.review.stockfish}</p>
+                <p className="text-xs text-gray-500">
+                  {getAnalysisStatusText(analysisStatus, analysisError, t.review)}
+                </p>
+              </div>
 
-            <div className="mt-3 grid gap-2 text-sm">
-              <p>
-                <span className="font-semibold">Depth reached:</span>{" "}
-                {currentAnalysis?.depthReached ?? 0}
-              </p>
-              <p>
-                <span className="font-semibold">Eval:</span>{" "}
-                {formatEngineScore(
-                  whitePerspectiveEval.scoreCp,
-                  whitePerspectiveEval.mate
-                )}
-              </p>
-              <p>
-                <span className="font-semibold">Best move:</span>{" "}
-                {bestMoveSan ?? "—"}
-              </p>
-              <p className="break-words">
-                <span className="font-semibold">PV:</span> {pvSan || "—"}
-              </p>
-              {analysisError ? (
-                <p className="text-sm text-red-600">{analysisError}</p>
-              ) : null}
+              <div className="mt-3 grid gap-2 text-sm">
+                <p>
+                  <span className="font-semibold">{t.review.depthReached}:</span>{" "}
+                  {currentAnalysis?.depthReached ?? 0}
+                </p>
+                <p>
+                  <span className="font-semibold">{t.review.eval}:</span>{" "}
+                  {formatEngineScore(
+                    whitePerspectiveEval.scoreCp,
+                    whitePerspectiveEval.mate
+                  )}
+                </p>
+                <p>
+                  <span className="font-semibold">{t.review.bestMove}:</span>{" "}
+                  {bestMoveSan ?? "—"}
+                </p>
+                <p className="break-words">
+                  <span className="font-semibold">{t.review.pv}:</span>{" "}
+                  {pvSan || "—"}
+                </p>
+                {analysisError ? (
+                  <p className="text-sm text-red-600">{analysisError}</p>
+                ) : null}
+              </div>
             </div>
-          </div>
+          ) : null}
         </div>
 
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <h2 className="text-lg font-semibold">Moves</h2>
+          <h2 className="text-lg font-semibold">{t.review.moves}</h2>
 
           <div className="mt-4 max-h-[520px] overflow-auto rounded-xl bg-gray-100 p-3">
             {moveRows.length === 0 ? (
-              <p className="text-sm text-gray-600">No moves recorded.</p>
+              <p className="text-sm text-gray-600">{t.review.noMovesRecorded}</p>
             ) : (
               <div className="space-y-2">
                 {moveRows.map((row) => {
@@ -551,11 +608,10 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
                           onClick={() =>
                             row.white && setCurrentPly(row.white.moveNumber)
                           }
-                          className={`w-full rounded-lg px-2 py-1 text-left ${
-                            whiteSelected
+                          className={`w-full rounded-lg px-2 py-1 text-left ${whiteSelected
                               ? "bg-black text-white"
                               : getTagClasses(whiteTag)
-                          }`}
+                            }`}
                         >
                           {row.white?.san ?? "-"}
                         </button>
@@ -572,11 +628,10 @@ export default function GameReviewBoard({ game }: { game: GameReview }) {
                           onClick={() =>
                             row.black && setCurrentPly(row.black.moveNumber)
                           }
-                          className={`w-full rounded-lg px-2 py-1 text-left ${
-                            blackSelected
+                          className={`w-full rounded-lg px-2 py-1 text-left ${blackSelected
                               ? "bg-black text-white"
                               : getTagClasses(blackTag)
-                          }`}
+                            }`}
                         >
                           {row.black?.san ?? "-"}
                         </button>
