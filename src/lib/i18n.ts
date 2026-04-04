@@ -1,10 +1,15 @@
 type DeepWiden<T> =
-  T extends string ? string :
-  T extends number ? number :
-  T extends boolean ? boolean :
-  T extends readonly (infer U)[] ? DeepWiden<U>[] :
-  T extends object ? { [K in keyof T]: DeepWiden<T[K]> } :
-  T;
+  T extends string
+    ? string
+    : T extends number
+      ? number
+      : T extends boolean
+        ? boolean
+        : T extends readonly (infer U)[]
+          ? DeepWiden<U>[]
+          : T extends object
+            ? { [K in keyof T]: DeepWiden<T[K]> }
+            : T;
 
 export type Language = "fa" | "en";
 
@@ -22,6 +27,7 @@ const rawMessages = {
       yes: "بله",
       no: "خیر",
       guest: "مهمان",
+      backToHome: "بازگشت به صفحه اصلی",
     },
     home: {
       title: "شطرنج آنلاین ایران",
@@ -69,7 +75,7 @@ const rawMessages = {
       abort: "لغو بازی",
       seatAssignment: "نحوه اختصاص رنگ",
       seatAssignmentText:
-        "سازنده بازی به‌صورت تصادفی یک رنگ می‌گیرد. لینک دعوت به بازیکن دیگر اجازه می‌دهد صندلی خالی را بگیرد.",
+        "سازنده بازی به‌صورت تصادفی یک رنگ می‌گیرد.\nلینک دعوت به بازیکن دیگر اجازه می‌دهد صندلی خالی را بگیرد.",
       pgn: "PGN",
       moves: "حرکت‌ها",
       noMovesYet: "هنوز حرکتی انجام نشده.",
@@ -91,6 +97,43 @@ const rawMessages = {
       illegalMove: "حرکت غیرمجاز",
       submittingMove: "در حال ثبت حرکت...",
     },
+    authPhone: {
+      title: "ورود با شماره موبایل",
+      subtitle: "برای ورود یا ساخت حساب، شماره موبایل خودت را وارد کن.",
+      usernameLabel: "نام کاربری",
+      usernamePlaceholder: "مثلاً soroush",
+      phoneLabel: "شماره موبایل",
+      phonePlaceholder: "مثلاً 09123456789",
+      codeLabel: "کد تایید",
+      codePlaceholder: "کد پیامک‌شده",
+      sendCode: "ارسال کد",
+      sending: "در حال ارسال...",
+      verifyCode: "تایید کد",
+      verifying: "در حال تایید...",
+      codeSent: "کد تایید ارسال شد",
+      devCodePrefix: "کد توسعه",
+      sendFailed: "ارسال کد ناموفق بود",
+      verifyFailed: "تایید کد ناموفق بود",
+      phoneRequired: "شماره موبایل الزامی است",
+      usernameRequired: "برای حساب جدید، نام کاربری الزامی است",
+      usernameExists: "این نام کاربری قبلاً استفاده شده است",
+      phoneAndCodeRequired: "شماره موبایل و کد الزامی هستند",
+      codeNotFound: "کد تایید پیدا نشد",
+      codeExpired: "کد تایید منقضی شده است",
+      tooManyAttempts: "تعداد تلاش‌ها بیش از حد مجاز است",
+      invalidCode: "کد تایید نامعتبر است",
+      missingUsername: "نام کاربری برای ساخت حساب وجود ندارد",
+    },
+    gamesHistory: {
+      title: "تاریخچه بازی‌های شما",
+      empty: "هنوز بازی تمام‌شده‌ای ندارید.",
+      waiting: "در انتظار...",
+      result: "نتیجه",
+      moves: "تعداد حرکت‌ها",
+      review: "مرور بازی",
+      unknown: "نامشخص",
+      finishedAt: "زمان پایان",
+    },
   },
   en: {
     common: {
@@ -103,6 +146,7 @@ const rawMessages = {
       yes: "Yes",
       no: "No",
       guest: "Guest",
+      backToHome: "Back to home",
     },
     home: {
       title: "Online Chess IR",
@@ -150,7 +194,7 @@ const rawMessages = {
       abort: "Abort",
       seatAssignment: "Seat assignment",
       seatAssignmentText:
-        "The creator gets a random color. The invite link lets another logged-in player claim the open seat.",
+        "The creator gets a random color.\nThe invite link lets another logged-in player claim the open seat.",
       pgn: "PGN",
       moves: "Moves",
       noMovesYet: "No moves yet.",
@@ -171,6 +215,43 @@ const rawMessages = {
       moveYourOwnPiece: "You can only move your own pieces",
       illegalMove: "Illegal move",
       submittingMove: "Submitting move...",
+    },
+    authPhone: {
+      title: "Phone login",
+      subtitle: "Enter your phone number to sign in or create an account.",
+      usernameLabel: "Username",
+      usernamePlaceholder: "e.g. soroush",
+      phoneLabel: "Phone number",
+      phonePlaceholder: "e.g. 09123456789",
+      codeLabel: "Verification code",
+      codePlaceholder: "SMS code",
+      sendCode: "Send code",
+      sending: "Sending...",
+      verifyCode: "Verify code",
+      verifying: "Verifying...",
+      codeSent: "Verification code sent",
+      devCodePrefix: "Development code",
+      sendFailed: "Failed to send code",
+      verifyFailed: "Verification failed",
+      phoneRequired: "Phone number is required",
+      usernameRequired: "Username is required for a new account",
+      usernameExists: "Username already exists",
+      phoneAndCodeRequired: "Phone number and code are required",
+      codeNotFound: "Verification code not found",
+      codeExpired: "Verification code expired",
+      tooManyAttempts: "Too many attempts",
+      invalidCode: "Invalid verification code",
+      missingUsername: "Missing username for account creation",
+    },
+    gamesHistory: {
+      title: "Your Game History",
+      empty: "No finished games yet.",
+      waiting: "Waiting...",
+      result: "Result",
+      moves: "Moves",
+      review: "Review game",
+      unknown: "Unknown",
+      finishedAt: "Finished at",
     },
   },
 } as const;
