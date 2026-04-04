@@ -58,6 +58,8 @@ type Game = {
   blackConnected: boolean;
   whitePlayerId: string | null;
   blackPlayerId: string | null;
+  drawOfferedBySide: Side | null;
+  drawOfferedAt: string | null;
   whitePlayer: Player | null;
   blackPlayer: Player | null;
   moves: Move[];
@@ -126,6 +128,16 @@ function getSideLabel(side: Side | null, tGame: GameMessages) {
   return tGame.spectator;
 }
 
+function getViewerSide(
+  game: Pick<Game, "whitePlayerId" | "blackPlayerId"> | null,
+  currentUser: CurrentUser | null
+): Side | null {
+  if (!game || !currentUser) return null;
+  if (game.whitePlayerId === currentUser.id) return "white";
+  if (game.blackPlayerId === currentUser.id) return "black";
+  return null;
+}
+
 function formatClock(ms: number) {
   const safeMs = Math.max(0, ms);
   const totalSeconds = Math.floor(safeMs / 1000);
@@ -148,13 +160,25 @@ function getLiveClockMs(game: Game, side: Side) {
   return Math.max(0, base - elapsed);
 }
 
-function getStatusMessage(game: Game, tGame: GameMessages) {
+function getStatusMessage(
+  game: Game,
+  tGame: GameMessages,
+  viewerSide: Side | null
+) {
   if (game.status === "waiting") {
     return tGame.waitingPlayers;
   }
 
   if (game.status === "finished") {
     return `${tGame.finished}${game.result ? `: ${game.result}` : ""}`;
+  }
+
+  if (game.drawOfferedBySide && viewerSide) {
+    if (game.drawOfferedBySide === viewerSide) {
+      return tGame.drawOfferSent;
+    }
+
+    return tGame.drawOfferReceived;
   }
 
   return `${getTurnLabelFromFen(game.currentFen, tGame)} ${tGame.toMove}`;
@@ -264,16 +288,37 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
   const hasInitializedReviewPlyRef = useRef(false);
 
   const playerSide = useMemo<Side | null>(() => {
-    if (!game || !currentUser) return null;
-    if (game.whitePlayerId === currentUser.id) return "white";
-    if (game.blackPlayerId === currentUser.id) return "black";
-    return null;
+    return getViewerSide(game, currentUser);
   }, [game, currentUser]);
 
   const boardIsInteractive = useMemo(
     () => canPlayerInteract(game, playerSide, isSubmitting),
     [game, playerSide, isSubmitting]
   );
+
+  const drawOfferedByMe = useMemo(() => {
+    return !!game && !!playerSide && game.drawOfferedBySide === playerSide;
+  }, [game, playerSide]);
+
+  const drawOfferedByOpponent = useMemo(() => {
+    return (
+      !!game &&
+      !!playerSide &&
+      !!game.drawOfferedBySide &&
+      game.drawOfferedBySide !== playerSide
+    );
+  }, [game, playerSide]);
+
+  const canOfferDraw = useMemo(() => {
+    return (
+      !!game &&
+      !!playerSide &&
+      game.status === "active" &&
+      !!game.whitePlayerId &&
+      !!game.blackPlayerId &&
+      !game.drawOfferedBySide
+    );
+  }, [game, playerSide]);
 
   const contentAlignClass = language === "fa" ? "text-right" : "text-left";
   const actionsJustifyClass =
@@ -407,13 +452,15 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
         return;
       }
 
+      const nextViewerSide = getViewerSide(data.game, currentUser);
+
       setGame(data.game);
       setBoardFen(data.game.currentFen);
-      setStatusMessage(getStatusMessage(data.game, t.game));
+      setStatusMessage(getStatusMessage(data.game, t.game, nextViewerSide));
     } catch {
       setStatusMessage(t.game.failedToLoadGame);
     }
-  }, [gameId, t.game]);
+  }, [gameId, t.game, currentUser]);
 
   const tryJoinGame = useCallback(async () => {
     if (!token) return;
@@ -434,14 +481,16 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
         return;
       }
 
+      const nextViewerSide = getViewerSide(data.game, currentUser);
+
       setGame(data.game);
       setBoardFen(data.game.currentFen);
-      setStatusMessage(getStatusMessage(data.game, t.game));
+      setStatusMessage(getStatusMessage(data.game, t.game, nextViewerSide));
     } catch (error) {
       console.error("join failed", error);
       setStatusMessage(t.game.failedToJoinGame);
     }
-  }, [gameId, token, t.game]);
+  }, [gameId, token, t.game, currentUser]);
 
   const updatePresence = useCallback(
     async (connected: boolean) => {
@@ -463,7 +512,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
         if (response.ok && data.ok && data.game) {
           setGame(data.game);
           setBoardFen(data.game.currentFen);
-          setStatusMessage(getStatusMessage(data.game, t.game));
+          setStatusMessage(getStatusMessage(data.game, t.game, playerSide));
           return;
         }
 
@@ -526,13 +575,13 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     for (const move of highlightedMoves) {
       styles[move.square] = move.isCapture
         ? {
-          backgroundColor: "rgba(34, 197, 94, 0.18)",
-          boxShadow: "inset 0 0 0 4px rgba(34, 197, 94, 0.85)",
-        }
+            backgroundColor: "rgba(34, 197, 94, 0.18)",
+            boxShadow: "inset 0 0 0 4px rgba(34, 197, 94, 0.85)",
+          }
         : {
-          background:
-            "radial-gradient(circle, rgba(34, 197, 94, 0.45) 20%, transparent 22%)",
-        };
+            background:
+              "radial-gradient(circle, rgba(34, 197, 94, 0.45) 20%, transparent 22%)",
+          };
     }
 
     return styles;
@@ -544,7 +593,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       if (saved !== null) {
         setSoundEnabled(saved === "true");
       }
-    } catch { }
+    } catch {}
   }, []);
 
   useEffect(() => {
@@ -553,7 +602,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
         "online-chess-sound-enabled",
         String(soundEnabled)
       );
-    } catch { }
+    } catch {}
   }, [soundEnabled]);
 
   useEffect(() => {
@@ -595,9 +644,11 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     const handleGameUpdated = (payload: { gameId: string; game: Game }) => {
       if (payload.gameId !== gameId) return;
 
+      const nextViewerSide = getViewerSide(payload.game, currentUser);
+
       setGame(payload.game);
       setBoardFen(payload.game.currentFen);
-      setStatusMessage(getStatusMessage(payload.game, t.game));
+      setStatusMessage(getStatusMessage(payload.game, t.game, nextViewerSide));
       setIsSubmitting(false);
     };
 
@@ -607,7 +658,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       socket.emit("game:leave", gameId);
       socket.off("game:updated", handleGameUpdated);
     };
-  }, [gameId, loadGame, t.game]);
+  }, [gameId, loadGame, t.game, currentUser]);
 
   useEffect(() => {
     if (!playerSide) return;
@@ -690,15 +741,15 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       audioContextRef.current = null;
 
       if (context) {
-        void context.close().catch(() => { });
+        void context.close().catch(() => {});
       }
     };
   }, []);
 
   useEffect(() => {
     if (!game) return;
-    setStatusMessage(getStatusMessage(game, t.game));
-  }, [language, game, t.game]);
+    setStatusMessage(getStatusMessage(game, t.game, playerSide));
+  }, [language, game, t.game, playerSide]);
 
   useEffect(() => {
     setCurrentPly(null);
@@ -757,7 +808,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
 
         setGame(data.game);
         setBoardFen(data.game.currentFen);
-        setStatusMessage(getStatusMessage(data.game, t.game));
+        setStatusMessage(getStatusMessage(data.game, t.game, playerSide));
       } catch {
         await loadGame();
         setStatusMessage(t.game.moveFailed);
@@ -765,7 +816,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
         setIsSubmitting(false);
       }
     },
-    [gameId, loadGame, t.game]
+    [gameId, loadGame, t.game, playerSide]
   );
 
   const attemptMove = useCallback(
@@ -856,7 +907,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
 
       setGame(data.game);
       setBoardFen(data.game.currentFen);
-      setStatusMessage(getStatusMessage(data.game, t.game));
+      setStatusMessage(getStatusMessage(data.game, t.game, playerSide));
     } catch {
       setStatusMessage(t.game.failedToResign);
     }
@@ -887,10 +938,65 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
 
       setGame(data.game);
       setBoardFen(data.game.currentFen);
-      setStatusMessage(getStatusMessage(data.game, t.game));
+      setStatusMessage(getStatusMessage(data.game, t.game, playerSide));
     } catch {
       setStatusMessage(t.game.failedToAbort);
     }
+  }
+
+  async function submitDrawAction(action: "offer" | "accept" | "reject") {
+    if (!playerSide || !game) return;
+
+    void ensureAudioContext();
+
+    try {
+      const response = await fetch(`/api/games/${gameId}/draw`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action }),
+      });
+
+      const data: ActionResponse = await response.json();
+
+      if (!response.ok || !data.ok || !data.game) {
+        setStatusMessage(
+          data.error ??
+            (action === "offer"
+              ? t.game.failedToOfferDraw
+              : t.game.failedToRespondToDraw)
+        );
+        return;
+      }
+
+      setGame(data.game);
+      setBoardFen(data.game.currentFen);
+
+      if (action === "offer") {
+        setStatusMessage(t.game.drawOfferSent);
+      } else {
+        setStatusMessage(getStatusMessage(data.game, t.game, playerSide));
+      }
+    } catch {
+      setStatusMessage(
+        action === "offer"
+          ? t.game.failedToOfferDraw
+          : t.game.failedToRespondToDraw
+      );
+    }
+  }
+
+  async function handleOfferDraw() {
+    await submitDrawAction("offer");
+  }
+
+  async function handleAcceptDraw() {
+    await submitDrawAction("accept");
+  }
+
+  async function handleRejectDraw() {
+    await submitDrawAction("reject");
   }
 
   function onPieceDrop(sourceSquare: string, targetSquare: string) {
@@ -942,7 +1048,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
 
     try {
       await navigator.clipboard.writeText(game.pgn);
-    } catch { }
+    } catch {}
   }
 
   function handleDownloadPgn() {
@@ -1124,8 +1230,9 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
             </p>
 
             <div
-              className={`flex items-center gap-3 ${language === "fa" ? "justify-end" : "justify-between"
-                }`}
+              className={`flex items-center gap-3 ${
+                language === "fa" ? "justify-end" : "justify-between"
+              }`}
             >
               <span className="text-sm">
                 <span className="font-semibold">{t.game.sound}:</span>{" "}
@@ -1142,12 +1249,14 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
                     ? `${t.game.sound} ${t.common.off}`
                     : `${t.game.sound} ${t.common.on}`
                 }
-                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${soundEnabled ? "bg-blue-600" : "bg-gray-300"
-                  }`}
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                  soundEnabled ? "bg-blue-600" : "bg-gray-300"
+                }`}
               >
                 <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${soundEnabled ? "translate-x-6" : "translate-x-1"
-                    }`}
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    soundEnabled ? "translate-x-6" : "translate-x-1"
+                  }`}
                 />
               </button>
             </div>
@@ -1163,6 +1272,47 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
 
           {!isFinishedGame ? (
             <>
+              {playerSide && game?.status === "active" ? (
+                <div className="mt-4 rounded-2xl border bg-white p-3 shadow-sm">
+                  <div className="mb-2 text-sm font-semibold text-gray-700">
+                    {t.game.draw}
+                  </div>
+
+                  {drawOfferedByOpponent ? (
+                    <div className="space-y-2">
+                      <p className="text-sm text-amber-700">
+                        {t.game.drawOfferReceived}
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={handleAcceptDraw}
+                          className="flex-1 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+                        >
+                          {t.game.acceptDraw}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleRejectDraw}
+                          className="flex-1 rounded-xl border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                        >
+                          {t.game.rejectDraw}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleOfferDraw}
+                      disabled={!canOfferDraw}
+                      className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {drawOfferedByMe ? t.game.drawOfferSent : t.game.draw}
+                    </button>
+                  )}
+                </div>
+              ) : null}
+
               <div className={`mt-4 flex flex-col gap-2 ${actionsJustifyClass}`}>
                 <button
                   onClick={handleResign}
@@ -1248,8 +1398,9 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
                               setCurrentPly(move.moveNumber);
                             }
                           }}
-                          className={`rounded-lg px-2 py-1 ${selected ? "bg-black text-white" : "hover:bg-gray-200"
-                            }`}
+                          className={`rounded-lg px-2 py-1 ${
+                            selected ? "bg-black text-white" : "hover:bg-gray-200"
+                          }`}
                         >
                           {move.moveNumber}. {move.san} ({move.uci})
                         </button>

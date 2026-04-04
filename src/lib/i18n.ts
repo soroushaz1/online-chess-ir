@@ -1,15 +1,15 @@
 type DeepWiden<T> =
   T extends string
-    ? string
-    : T extends number
-      ? number
-      : T extends boolean
-        ? boolean
-        : T extends readonly (infer U)[]
-          ? DeepWiden<U>[]
-          : T extends object
-            ? { [K in keyof T]: DeepWiden<T[K]> }
-            : T;
+  ? string
+  : T extends number
+  ? number
+  : T extends boolean
+  ? boolean
+  : T extends readonly (infer U)[]
+  ? DeepWiden<U>[]
+  : T extends object
+  ? { [K in keyof T]: DeepWiden<T[K]> }
+  : T;
 
 export type Language = "fa" | "en";
 
@@ -96,6 +96,13 @@ const rawMessages = {
       moveYourOwnPiece: "فقط می‌توانید مهره‌های خودتان را حرکت بدهید",
       illegalMove: "حرکت غیرمجاز",
       submittingMove: "در حال ثبت حرکت...",
+      draw: "درخواست تساوی",
+      acceptDraw: "پذیرش تساوی",
+      rejectDraw: "رد تساوی",
+      drawOfferSent: "درخواست تساوی ارسال شد",
+      drawOfferReceived: "حریف درخواست تساوی داده است",
+      failedToOfferDraw: "ارسال درخواست تساوی ناموفق بود",
+      failedToRespondToDraw: "پاسخ به درخواست تساوی ناموفق بود",
     },
     authPhone: {
       title: "ورود با شماره موبایل",
@@ -245,6 +252,13 @@ const rawMessages = {
       moveYourOwnPiece: "You can only move your own pieces",
       illegalMove: "Illegal move",
       submittingMove: "Submitting move...",
+      draw: "Offer Draw",
+      acceptDraw: "Accept Draw",
+      rejectDraw: "Reject Draw",
+      drawOfferSent: "Draw offer sent",
+      drawOfferReceived: "Your opponent offered a draw",
+      failedToOfferDraw: "Failed to offer draw",
+      failedToRespondToDraw: "Failed to respond to draw",
     },
     authPhone: {
       title: "Phone login",

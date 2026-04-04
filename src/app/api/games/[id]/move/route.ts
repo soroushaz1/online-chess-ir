@@ -167,6 +167,8 @@ export async function POST(request: NextRequest, { params }: Params) {
         pgn: timeoutPgn,
         finishedAt: now,
         turnStartedAt: null,
+        drawOfferedBySide: null,
+        drawOfferedAt: null,
       },
       include: {
         whitePlayer: {
@@ -283,6 +285,8 @@ export async function POST(request: NextRequest, { params }: Params) {
         whiteTimeMs: nextWhiteTimeMs,
         blackTimeMs: nextBlackTimeMs,
         turnStartedAt: nextStatus === "active" ? now : null,
+        drawOfferedBySide: null,
+        drawOfferedAt: null,
       },
     }),
   ]);

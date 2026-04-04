@@ -116,6 +116,8 @@ export async function POST(_request: NextRequest, { params }: Params) {
       pgn: nextPgn,
       finishedAt: new Date(),
       turnStartedAt: null,
+      drawOfferedBySide: null,
+      drawOfferedAt: null,
     },
     include: {
       whitePlayer: {
