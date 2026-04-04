@@ -71,7 +71,13 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   const game = await prisma.game.findUnique({
     where: { id },
-    include: gameInclude,
+    select: {
+      id: true,
+      status: true,
+      turnStartedAt: true,
+      whitePlayerId: true,
+      blackPlayerId: true,
+    },
   });
 
   if (!game) {
@@ -90,31 +96,45 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
-  const nextWhiteConnected =
-    playerSide === "white" ? connected : game.whiteConnected;
-  const nextBlackConnected =
-    playerSide === "black" ? connected : game.blackConnected;
-
-  const bothSeatsFilled = !!game.whitePlayerId && !!game.blackPlayerId;
-
-  const shouldActivate =
-    game.status === "waiting" &&
-    bothSeatsFilled &&
-    nextWhiteConnected &&
-    nextBlackConnected;
-
-  const updatedGame = await prisma.game.update({
+  await prisma.game.update({
     where: { id },
-    data: {
-      whiteConnected: nextWhiteConnected,
-      blackConnected: nextBlackConnected,
-      status: shouldActivate ? "active" : game.status,
-      turnStartedAt: shouldActivate
-        ? game.turnStartedAt ?? new Date()
-        : game.turnStartedAt,
-    },
+    data:
+      playerSide === "white"
+        ? { whiteConnected: connected }
+        : { blackConnected: connected },
+  });
+
+  let updatedGame = await prisma.game.findUnique({
+    where: { id },
     include: gameInclude,
   });
+
+  if (!updatedGame) {
+    return NextResponse.json(
+      { ok: false, error: "Game not found after update" },
+      { status: 404 }
+    );
+  }
+
+  const bothSeatsFilled =
+    !!updatedGame.whitePlayerId && !!updatedGame.blackPlayerId;
+
+  const shouldActivate =
+    updatedGame.status === "waiting" &&
+    bothSeatsFilled &&
+    updatedGame.whiteConnected &&
+    updatedGame.blackConnected;
+
+  if (shouldActivate) {
+    updatedGame = await prisma.game.update({
+      where: { id },
+      data: {
+        status: "active",
+        turnStartedAt: updatedGame.turnStartedAt ?? new Date(),
+      },
+      include: gameInclude,
+    });
+  }
 
   emitGameUpdated(id, updatedGame);
 
