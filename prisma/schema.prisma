@@ -70,8 +70,10 @@ model Game {
   turnStartedAt             DateTime?              @default(now())
   whiteConnected            Boolean                @default(false)
   blackConnected            Boolean                @default(false)
-  drawOfferedBySide String?
-  drawOfferedAt DateTime?
+  whiteLastSeenAt           DateTime?
+  blackLastSeenAt           DateTime?
+  drawOfferedBySide         String?
+  drawOfferedAt             DateTime?
   analysisStatus            String                 @default("idle")
   analysisStartedAt         DateTime?
   analysisCompletedAt       DateTime?

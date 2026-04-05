@@ -77,6 +77,10 @@ export async function POST(request: NextRequest, { params }: Params) {
       turnStartedAt: true,
       whitePlayerId: true,
       blackPlayerId: true,
+      whiteConnected: true,
+      blackConnected: true,
+      whiteLastSeenAt: true,
+      blackLastSeenAt: true,
     },
   });
 
@@ -96,12 +100,25 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
+  const alreadySame =
+    playerSide === "white"
+      ? game.whiteConnected === connected
+      : game.blackConnected === connected;
+
+  const now = new Date();
+
   await prisma.game.update({
     where: { id },
     data:
       playerSide === "white"
-        ? { whiteConnected: connected }
-        : { blackConnected: connected },
+        ? {
+            whiteConnected: connected,
+            whiteLastSeenAt: now,
+          }
+        : {
+            blackConnected: connected,
+            blackLastSeenAt: now,
+          },
   });
 
   let updatedGame = await prisma.game.findUnique({
@@ -130,13 +147,15 @@ export async function POST(request: NextRequest, { params }: Params) {
       where: { id },
       data: {
         status: "active",
-        turnStartedAt: updatedGame.turnStartedAt ?? new Date(),
+        turnStartedAt: updatedGame.turnStartedAt ?? now,
       },
       include: gameInclude,
     });
   }
 
-  emitGameUpdated(id, updatedGame);
+  if (!alreadySame || shouldActivate) {
+    emitGameUpdated(id, updatedGame);
+  }
 
   return NextResponse.json({
     ok: true,

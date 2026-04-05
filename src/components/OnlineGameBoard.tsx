@@ -56,6 +56,8 @@ type Game = {
   blackJoinToken: string | null;
   whiteConnected: boolean;
   blackConnected: boolean;
+  whiteLastSeenAt: string | null;
+  blackLastSeenAt: string | null;
   whitePlayerId: string | null;
   blackPlayerId: string | null;
   drawOfferedBySide: Side | null;
@@ -75,6 +77,7 @@ type ActionResponse = {
   ok: boolean;
   error?: string;
   game?: Game;
+  availableInMs?: number;
 };
 
 type MeResponse = {
@@ -86,6 +89,10 @@ type HighlightedMove = {
   square: string;
   isCapture: boolean;
 };
+
+const INACTIVITY_WARNING_MS = 20_000;
+const CLAIM_AFTER_MS = 60_000;
+const PRESENCE_HEARTBEAT_MS = 5_000;
 
 function getTurnFromFen(fen: string): Side {
   return fen.split(" ")[1] === "b" ? "black" : "white";
@@ -177,7 +184,6 @@ function getStatusMessage(
     if (game.drawOfferedBySide === viewerSide) {
       return tGame.drawOfferSent;
     }
-
     return tGame.drawOfferReceived;
   }
 
@@ -273,7 +279,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     t.game.loadingGame
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
 
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   const [highlightedMoves, setHighlightedMoves] = useState<HighlightedMove[]>(
@@ -286,10 +292,23 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
   const hasSeenInitialGameRef = useRef(false);
   const previousGameRef = useRef<Game | null>(null);
   const hasInitializedReviewPlyRef = useRef(false);
+  const presenceAbortControllerRef = useRef<AbortController | null>(null);
+  const pageHideSentOfflineRef = useRef(false);
+  const timeoutSubmittingRef = useRef(false);
+  const tGameRef = useRef(t.game);
+
+  useEffect(() => {
+    tGameRef.current = t.game;
+  }, [t.game]);
 
   const playerSide = useMemo<Side | null>(() => {
     return getViewerSide(game, currentUser);
   }, [game, currentUser]);
+
+  const currentTurn = useMemo<Side | null>(() => {
+    if (!game) return null;
+    return getTurnFromFen(game.currentFen);
+  }, [game]);
 
   const boardIsInteractive = useMemo(
     () => canPlayerInteract(game, playerSide, isSubmitting),
@@ -319,6 +338,38 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       !game.drawOfferedBySide
     );
   }, [game, playerSide]);
+
+  const nowMs = Date.now();
+
+  const opponentTurnStartedAtMs =
+    game?.status === "active" &&
+    currentTurn &&
+    playerSide &&
+    currentTurn !== playerSide &&
+    game.turnStartedAt
+      ? new Date(game.turnStartedAt).getTime()
+      : null;
+
+  const opponentInactivityElapsedMs =
+    opponentTurnStartedAtMs !== null ? nowMs - opponentTurnStartedAtMs : null;
+
+  const inactivityClaimRemainingMs =
+    opponentTurnStartedAtMs !== null
+      ? Math.max(0, opponentTurnStartedAtMs + CLAIM_AFTER_MS - nowMs)
+      : null;
+
+  const showInactivityClaimSection =
+    !!game &&
+    !!playerSide &&
+    !!currentTurn &&
+    game.status === "active" &&
+    currentTurn !== playerSide &&
+    opponentInactivityElapsedMs !== null &&
+    opponentInactivityElapsedMs >= INACTIVITY_WARNING_MS;
+
+  const canClaimDisconnectWin =
+    showInactivityClaimSection &&
+    (inactivityClaimRemainingMs ?? 1) <= 1000;
 
   const contentAlignClass = language === "fa" ? "text-right" : "text-left";
   const actionsJustifyClass =
@@ -448,19 +499,16 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       const data: GameResponse = await response.json();
 
       if (!response.ok || !data.ok || !data.game) {
-        setStatusMessage(data.error ?? t.game.failedToLoadGame);
+        setStatusMessage(data.error ?? tGameRef.current.failedToLoadGame);
         return;
       }
 
-      const nextViewerSide = getViewerSide(data.game, currentUser);
-
       setGame(data.game);
       setBoardFen(data.game.currentFen);
-      setStatusMessage(getStatusMessage(data.game, t.game, nextViewerSide));
     } catch {
-      setStatusMessage(t.game.failedToLoadGame);
+      setStatusMessage(tGameRef.current.failedToLoadGame);
     }
-  }, [gameId, t.game, currentUser]);
+  }, [gameId]);
 
   const tryJoinGame = useCallback(async () => {
     if (!token) return;
@@ -477,26 +525,36 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       const data: ActionResponse = await response.json();
 
       if (!response.ok || !data.ok || !data.game) {
-        setStatusMessage(data.error ?? t.game.failedToJoinGame);
+        setStatusMessage(data.error ?? tGameRef.current.failedToJoinGame);
         return;
       }
 
-      const nextViewerSide = getViewerSide(data.game, currentUser);
-
       setGame(data.game);
       setBoardFen(data.game.currentFen);
-      setStatusMessage(getStatusMessage(data.game, t.game, nextViewerSide));
     } catch (error) {
       console.error("join failed", error);
-      setStatusMessage(t.game.failedToJoinGame);
+      setStatusMessage(tGameRef.current.failedToJoinGame);
     }
-  }, [gameId, token, t.game, currentUser]);
+  }, [gameId, token]);
 
   const updatePresence = useCallback(
-    async (connected: boolean) => {
+    async (
+      connected: boolean,
+      options?: {
+        syncGameState?: boolean;
+        keepalive?: boolean;
+      }
+    ) => {
       if (!playerSide) return;
 
       try {
+        if (presenceAbortControllerRef.current) {
+          presenceAbortControllerRef.current.abort();
+        }
+
+        const controller = new AbortController();
+        presenceAbortControllerRef.current = controller;
+
         const response = await fetch(`/api/games/${gameId}/presence`, {
           method: "POST",
           headers: {
@@ -505,23 +563,32 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
           body: JSON.stringify({
             connected,
           }),
+          signal: controller.signal,
+          keepalive: options?.keepalive ?? false,
         });
 
         const data: ActionResponse = await response.json();
 
+        if (!options?.syncGameState) {
+          return;
+        }
+
         if (response.ok && data.ok && data.game) {
           setGame(data.game);
           setBoardFen(data.game.currentFen);
-          setStatusMessage(getStatusMessage(data.game, t.game, playerSide));
           return;
         }
 
         await loadGame();
-      } catch {
-        await loadGame();
+      } catch (error) {
+        if ((error as Error).name === "AbortError") return;
+
+        if (options?.syncGameState) {
+          await loadGame();
+        }
       }
     },
-    [playerSide, gameId, loadGame, t.game]
+    [playerSide, gameId, loadGame]
   );
 
   const showLegalMovesForSquare = useCallback(
@@ -620,12 +687,12 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
         await loadGame();
       } catch (error) {
         console.error("initializePage failed", error);
-        setStatusMessage(t.game.failedToInitializeGame);
+        setStatusMessage(tGameRef.current.failedToInitializeGame);
       }
     }
 
     void initializePage();
-  }, [gameId, token, tryJoinGame, loadGame, t.game]);
+  }, [gameId, token, tryJoinGame, loadGame]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -644,11 +711,8 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     const handleGameUpdated = (payload: { gameId: string; game: Game }) => {
       if (payload.gameId !== gameId) return;
 
-      const nextViewerSide = getViewerSide(payload.game, currentUser);
-
       setGame(payload.game);
       setBoardFen(payload.game.currentFen);
-      setStatusMessage(getStatusMessage(payload.game, t.game, nextViewerSide));
       setIsSubmitting(false);
     };
 
@@ -658,23 +722,104 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       socket.emit("game:leave", gameId);
       socket.off("game:updated", handleGameUpdated);
     };
-  }, [gameId, loadGame, t.game, currentUser]);
+  }, [gameId, loadGame]);
 
   useEffect(() => {
     if (!playerSide) return;
 
-    let active = true;
+    pageHideSentOfflineRef.current = false;
+    void updatePresence(true, { syncGameState: true });
 
-    void (async () => {
-      if (!active) return;
-      await updatePresence(true);
-    })();
+    const sendOfflinePresence = () => {
+      if (pageHideSentOfflineRef.current) return;
+      pageHideSentOfflineRef.current = true;
+      void updatePresence(false, {
+        keepalive: true,
+        syncGameState: false,
+      });
+    };
+
+    window.addEventListener("pagehide", sendOfflinePresence);
+    window.addEventListener("beforeunload", sendOfflinePresence);
 
     return () => {
-      active = false;
-      void updatePresence(false);
+      window.removeEventListener("pagehide", sendOfflinePresence);
+      window.removeEventListener("beforeunload", sendOfflinePresence);
+
+      if (!pageHideSentOfflineRef.current) {
+        sendOfflinePresence();
+      }
     };
-  }, [playerSide, gameId, updatePresence]);
+  }, [playerSide, updatePresence]);
+
+  useEffect(() => {
+    if (!playerSide) return;
+
+    const interval = window.setInterval(() => {
+      void updatePresence(true, { syncGameState: false });
+    }, PRESENCE_HEARTBEAT_MS);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [playerSide, updatePresence]);
+
+  useEffect(() => {
+    return () => {
+      if (presenceAbortControllerRef.current) {
+        presenceAbortControllerRef.current.abort();
+        presenceAbortControllerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!game || !playerSide || game.status !== "active") {
+      timeoutSubmittingRef.current = false;
+      return;
+    }
+
+    const turn = getTurnFromFen(game.currentFen);
+    const liveMs = getLiveClockMs(game, turn);
+
+    if (liveMs > 0) {
+      timeoutSubmittingRef.current = false;
+      return;
+    }
+
+    if (timeoutSubmittingRef.current) {
+      return;
+    }
+
+    timeoutSubmittingRef.current = true;
+
+    void (async () => {
+      try {
+        const response = await fetch(`/api/games/${gameId}/timeout`, {
+          method: "POST",
+        });
+
+        const data: ActionResponse = await response.json();
+
+        if (response.ok && data.ok && data.game) {
+          setGame(data.game);
+          setBoardFen(data.game.currentFen);
+          return;
+        }
+
+        if (data.game) {
+          setGame(data.game);
+          setBoardFen(data.game.currentFen);
+          return;
+        }
+
+        timeoutSubmittingRef.current = false;
+      } catch (error) {
+        console.error("timeout finalize failed", error);
+        timeoutSubmittingRef.current = false;
+      }
+    })();
+  }, [game, playerSide, gameId, tick]);
 
   useEffect(() => {
     if (!game || game.status !== "waiting") return;
@@ -687,18 +832,6 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       window.clearInterval(interval);
     };
   }, [game, loadGame]);
-
-  useEffect(() => {
-    if (!playerSide) return;
-
-    const interval = window.setInterval(() => {
-      void updatePresence(true);
-    }, 5000);
-
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [playerSide, updatePresence]);
 
   useEffect(() => {
     clearMoveHighlights();
@@ -749,7 +882,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
   useEffect(() => {
     if (!game) return;
     setStatusMessage(getStatusMessage(game, t.game, playerSide));
-  }, [language, game, t.game, playerSide]);
+  }, [game, t.game, playerSide]);
 
   useEffect(() => {
     setCurrentPly(null);
@@ -808,7 +941,6 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
 
         setGame(data.game);
         setBoardFen(data.game.currentFen);
-        setStatusMessage(getStatusMessage(data.game, t.game, playerSide));
       } catch {
         await loadGame();
         setStatusMessage(t.game.moveFailed);
@@ -816,7 +948,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
         setIsSubmitting(false);
       }
     },
-    [gameId, loadGame, t.game, playerSide]
+    [gameId, loadGame, t.game]
   );
 
   const attemptMove = useCallback(
@@ -833,9 +965,9 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
         return false;
       }
 
-      const currentTurn = getTurnFromFen(game.currentFen);
+      const turn = getTurnFromFen(game.currentFen);
 
-      if (currentTurn !== playerSide) {
+      if (turn !== playerSide) {
         setStatusMessage(t.game.notYourTurn);
         return false;
       }
@@ -907,7 +1039,6 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
 
       setGame(data.game);
       setBoardFen(data.game.currentFen);
-      setStatusMessage(getStatusMessage(data.game, t.game, playerSide));
     } catch {
       setStatusMessage(t.game.failedToResign);
     }
@@ -938,9 +1069,44 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
 
       setGame(data.game);
       setBoardFen(data.game.currentFen);
-      setStatusMessage(getStatusMessage(data.game, t.game, playerSide));
     } catch {
       setStatusMessage(t.game.failedToAbort);
+    }
+  }
+
+  async function handleClaimDisconnectWin() {
+    if (!playerSide || !game) return;
+
+    void ensureAudioContext();
+
+    try {
+      const response = await fetch(
+        `/api/games/${gameId}/claim-disconnect-win`,
+        {
+          method: "POST",
+        }
+      );
+
+      const data: ActionResponse = await response.json();
+      console.log("claim-disconnect-win response", data);
+
+      if (!response.ok || !data.ok || !data.game) {
+        if (typeof data.availableInMs === "number" && data.availableInMs > 0) {
+          setStatusMessage(
+            `${t.game.claimAvailableIn} ${Math.ceil(data.availableInMs / 1000)}s`
+          );
+          return;
+        }
+
+        setStatusMessage(data.error ?? t.game.failedToClaimDisconnectWin);
+        return;
+      }
+
+      setGame(data.game);
+      setBoardFen(data.game.currentFen);
+    } catch (error) {
+      console.error("claim disconnect win failed", error);
+      setStatusMessage(t.game.failedToClaimDisconnectWin);
     }
   }
 
@@ -975,8 +1141,6 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
 
       if (action === "offer") {
         setStatusMessage(t.game.drawOfferSent);
-      } else {
-        setStatusMessage(getStatusMessage(data.game, t.game, playerSide));
       }
     } catch {
       setStatusMessage(
@@ -1309,6 +1473,29 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
                     >
                       {drawOfferedByMe ? t.game.drawOfferSent : t.game.draw}
                     </button>
+                  )}
+                </div>
+              ) : null}
+
+              {showInactivityClaimSection ? (
+                <div className="mt-4 rounded-2xl border bg-amber-50 p-3 shadow-sm">
+                  <div className="mb-2 text-sm font-semibold text-amber-800">
+                    {t.game.opponentInactive}
+                  </div>
+
+                  {canClaimDisconnectWin ? (
+                    <button
+                      type="button"
+                      onClick={handleClaimDisconnectWin}
+                      className="w-full rounded-xl bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700"
+                    >
+                      {t.game.claimDisconnectWin}
+                    </button>
+                  ) : (
+                    <p className="text-sm text-amber-700">
+                      {t.game.claimAvailableIn}{" "}
+                      {Math.ceil((inactivityClaimRemainingMs ?? 0) / 1000)}s
+                    </p>
                   )}
                 </div>
               ) : null}

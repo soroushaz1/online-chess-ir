@@ -1,15 +1,15 @@
 type DeepWiden<T> =
   T extends string
-  ? string
-  : T extends number
-  ? number
-  : T extends boolean
-  ? boolean
-  : T extends readonly (infer U)[]
-  ? DeepWiden<U>[]
-  : T extends object
-  ? { [K in keyof T]: DeepWiden<T[K]> }
-  : T;
+    ? string
+    : T extends number
+      ? number
+      : T extends boolean
+        ? boolean
+        : T extends readonly (infer U)[]
+          ? DeepWiden<U>[]
+          : T extends object
+            ? { [K in keyof T]: DeepWiden<T[K]> }
+            : T;
 
 export type Language = "fa" | "en";
 
@@ -103,6 +103,11 @@ const rawMessages = {
       drawOfferReceived: "حریف درخواست تساوی داده است",
       failedToOfferDraw: "ارسال درخواست تساوی ناموفق بود",
       failedToRespondToDraw: "پاسخ به درخواست تساوی ناموفق بود",
+      opponentInactive: "حریف در نوبت خودش بیش از حد بدون حرکت مانده است",
+      claimDisconnectWin: "ثبت پیروزی به دلیل بی‌حرکتی حریف",
+      claimAvailableIn: "امکان ثبت پیروزی تا",
+      failedToClaimDisconnectWin:
+        "ثبت پیروزی به دلیل بی‌حرکتی حریف ناموفق بود",
     },
     authPhone: {
       title: "ورود با شماره موبایل",
@@ -259,6 +264,10 @@ const rawMessages = {
       drawOfferReceived: "Your opponent offered a draw",
       failedToOfferDraw: "Failed to offer draw",
       failedToRespondToDraw: "Failed to respond to draw",
+      opponentInactive: "Your opponent has been inactive on their turn",
+      claimDisconnectWin: "Claim win by opponent inactivity",
+      claimAvailableIn: "Claim will be available in",
+      failedToClaimDisconnectWin: "Failed to claim win by opponent inactivity",
     },
     authPhone: {
       title: "Phone login",
