@@ -3,6 +3,7 @@
 import Link from "next/link";
 import {
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -77,6 +78,18 @@ type Game = {
   moves: Move[];
 };
 
+type ChatMessage = {
+  id: string;
+  gameId: string;
+  userId: string;
+  text: string;
+  createdAt: string;
+  user: {
+    id: string;
+    username: string;
+  };
+};
+
 type GameResponse = {
   ok: boolean;
   game?: Game;
@@ -95,6 +108,13 @@ type MeResponse = {
   user: CurrentUser | null;
 };
 
+type ChatResponse = {
+  ok: boolean;
+  error?: string;
+  messages?: ChatMessage[];
+  message?: ChatMessage;
+};
+
 type HighlightedMove = {
   square: string;
   isCapture: boolean;
@@ -103,6 +123,7 @@ type HighlightedMove = {
 const INACTIVITY_WARNING_MS = 20_000;
 const CLAIM_AFTER_MS = 60_000;
 const PRESENCE_HEARTBEAT_MS = 5_000;
+const CHAT_MAX_LENGTH = 300;
 
 function getTurnFromFen(fen: string): Side {
   return fen.split(" ")[1] === "b" ? "black" : "white";
@@ -329,6 +350,10 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [currentPly, setCurrentPly] = useState<number | null>(null);
 
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [isChatSubmitting, setIsChatSubmitting] = useState(false);
+
   const audioContextRef = useRef<AudioContext | null>(null);
   const hasSeenInitialGameRef = useRef(false);
   const previousGameRef = useRef<Game | null>(null);
@@ -337,6 +362,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
   const pageHideSentOfflineRef = useRef(false);
   const timeoutSubmittingRef = useRef(false);
   const tGameRef = useRef(t.game);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     tGameRef.current = t.game;
@@ -384,10 +410,10 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
 
   const opponentTurnStartedAtMs =
     game?.status === "active" &&
-    currentTurn &&
-    playerSide &&
-    currentTurn !== playerSide &&
-    game.turnStartedAt
+      currentTurn &&
+      playerSide &&
+      currentTurn !== playerSide &&
+      game.turnStartedAt
       ? new Date(game.turnStartedAt).getTime()
       : null;
 
@@ -562,6 +588,24 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     }
   }, [gameId]);
 
+  const loadChat = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/games/${gameId}/chat`, {
+        cache: "no-store",
+      });
+
+      const data: ChatResponse = await response.json();
+
+      if (!response.ok || !data.ok || !data.messages) {
+        return;
+      }
+
+      setChatMessages(data.messages);
+    } catch {
+      // ignore silent chat load failure
+    }
+  }, [gameId]);
+
   const tryJoinGame = useCallback(async () => {
     if (!token) return;
 
@@ -694,13 +738,13 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     for (const move of highlightedMoves) {
       styles[move.square] = move.isCapture
         ? {
-            backgroundColor: "rgba(34, 197, 94, 0.18)",
-            boxShadow: "inset 0 0 0 4px rgba(34, 197, 94, 0.85)",
-          }
+          backgroundColor: "rgba(34, 197, 94, 0.18)",
+          boxShadow: "inset 0 0 0 4px rgba(34, 197, 94, 0.85)",
+        }
         : {
-            background:
-              "radial-gradient(circle, rgba(34, 197, 94, 0.45) 20%, transparent 22%)",
-          };
+          background:
+            "radial-gradient(circle, rgba(34, 197, 94, 0.45) 20%, transparent 22%)",
+        };
     }
 
     return styles;
@@ -712,7 +756,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       if (saved !== null) {
         setSoundEnabled(saved === "true");
       }
-    } catch {}
+    } catch { }
   }, []);
 
   useEffect(() => {
@@ -721,7 +765,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
         "online-chess-sound-enabled",
         String(soundEnabled)
       );
-    } catch {}
+    } catch { }
   }, [soundEnabled]);
 
   useEffect(() => {
@@ -737,6 +781,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
         }
 
         await loadGame();
+        await loadChat();
       } catch (error) {
         console.error("initializePage failed", error);
         setStatusMessage(tGameRef.current.failedToInitializeGame);
@@ -744,7 +789,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     }
 
     void initializePage();
-  }, [gameId, token, tryJoinGame, loadGame]);
+  }, [gameId, token, tryJoinGame, loadGame, loadChat]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -768,11 +813,28 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       setIsSubmitting(false);
     };
 
+    const handleNewChatMessage = (payload: {
+      gameId: string;
+      message: ChatMessage;
+    }) => {
+      if (payload.gameId !== gameId) return;
+
+      setChatMessages((prev) => {
+        if (prev.some((message) => message.id === payload.message.id)) {
+          return prev;
+        }
+
+        return [...prev, payload.message];
+      });
+    };
+
     socket.on("game:updated", handleGameUpdated);
+    socket.on("chat:new-message", handleNewChatMessage);
 
     return () => {
       socket.emit("game:leave", gameId);
       socket.off("game:updated", handleGameUpdated);
+      socket.off("chat:new-message", handleNewChatMessage);
     };
   }, [gameId, loadGame]);
 
@@ -926,7 +988,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       audioContextRef.current = null;
 
       if (context) {
-        void context.close().catch(() => {});
+        void context.close().catch(() => { });
       }
     };
   }, []);
@@ -967,6 +1029,13 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
 
     void playSound("move");
   }, [isFinishedGame, effectivePly, playSound]);
+
+  useEffect(() => {
+    const element = chatScrollRef.current;
+    if (!element) return;
+
+    element.scrollTop = element.scrollHeight;
+  }, [chatMessages]);
 
   const submitMove = useCallback(
     async (from: string, to: string) => {
@@ -1181,9 +1250,9 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
       if (!response.ok || !data.ok || !data.game) {
         setStatusMessage(
           data.error ??
-            (action === "offer"
-              ? t.game.failedToOfferDraw
-              : t.game.failedToRespondToDraw)
+          (action === "offer"
+            ? t.game.failedToOfferDraw
+            : t.game.failedToRespondToDraw)
         );
         return;
       }
@@ -1213,6 +1282,65 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
 
   async function handleRejectDraw() {
     await submitDrawAction("reject");
+  }
+
+  async function handleSendChatMessage() {
+    const text = chatInput.trim();
+
+    if (!currentUser) {
+      setStatusMessage(t.game.chatLoginRequired);
+      return;
+    }
+
+    if (!text) return;
+
+    if (text.length > CHAT_MAX_LENGTH) {
+      setStatusMessage(t.game.chatTooLong);
+      return;
+    }
+
+    setIsChatSubmitting(true);
+
+    try {
+      const response = await fetch(`/api/games/${gameId}/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ text }),
+      });
+
+      const data: ChatResponse = await response.json();
+
+      if (!response.ok || !data.ok) {
+        setStatusMessage(data.error ?? t.game.chatSendFailed);
+        return;
+      }
+
+      if (data.message) {
+        const newMessage = data.message;
+
+        setChatMessages((prev) => {
+          if (prev.some((message) => message.id === newMessage.id)) {
+            return prev;
+          }
+
+          return [...prev, newMessage];
+        });
+      }
+
+      setChatInput("");
+    } catch {
+      setStatusMessage(t.game.chatSendFailed);
+    } finally {
+      setIsChatSubmitting(false);
+    }
+  }
+
+  function handleChatKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter" || event.shiftKey) return;
+    event.preventDefault();
+    void handleSendChatMessage();
   }
 
   function onPieceDrop(sourceSquare: string, targetSquare: string) {
@@ -1264,7 +1392,7 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
 
     try {
       await navigator.clipboard.writeText(game.pgn);
-    } catch {}
+    } catch { }
   }
 
   function handleDownloadPgn() {
@@ -1444,7 +1572,9 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
             </p>
 
             <p>
-              <span className="font-semibold">{ratingLabel} {t.game.white}:</span>{" "}
+              <span className="font-semibold">
+                {ratingLabel} {t.game.white}:
+              </span>{" "}
               {whiteDisplayedRating ?? "—"}
               {game?.status === "finished" && whiteRatingDelta != null
                 ? ` (${formatRatingDelta(whiteRatingDelta)})`
@@ -1457,7 +1587,9 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
             </p>
 
             <p>
-              <span className="font-semibold">{ratingLabel} {t.game.black}:</span>{" "}
+              <span className="font-semibold">
+                {ratingLabel} {t.game.black}:
+              </span>{" "}
               {blackDisplayedRating ?? "—"}
               {game?.status === "finished" && blackRatingDelta != null
                 ? ` (${formatRatingDelta(blackRatingDelta)})`
@@ -1482,9 +1614,8 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
             </p>
 
             <div
-              className={`flex items-center gap-3 ${
-                language === "fa" ? "justify-end" : "justify-between"
-              }`}
+              className={`flex items-center gap-3 ${language === "fa" ? "justify-end" : "justify-between"
+                }`}
             >
               <span className="text-sm">
                 <span className="font-semibold">{t.game.sound}:</span>{" "}
@@ -1501,14 +1632,12 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
                     ? `${t.game.sound} ${t.common.off}`
                     : `${t.game.sound} ${t.common.on}`
                 }
-                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-                  soundEnabled ? "bg-blue-600" : "bg-gray-300"
-                }`}
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${soundEnabled ? "bg-blue-600" : "bg-gray-300"
+                  }`}
               >
                 <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    soundEnabled ? "translate-x-6" : "translate-x-1"
-                  }`}
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${soundEnabled ? "translate-x-6" : "translate-x-1"
+                    }`}
                 />
               </button>
             </div>
@@ -1647,6 +1776,73 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
           )}
 
           <div className="mt-6">
+            <h3 className="font-semibold">{t.game.chatTitle}</h3>
+
+            <div
+              ref={chatScrollRef}
+              className="mt-2 max-h-64 overflow-auto rounded-xl bg-gray-100 p-3 text-sm"
+            >
+              {chatMessages.length ? (
+                <div className="space-y-3">
+                  {chatMessages.map((message) => {
+                    const isMine = currentUser?.id === message.userId;
+
+                    return (
+                      <div
+                        key={message.id}
+                        className={`rounded-xl px-3 py-2 ${isMine ? "bg-blue-100" : "bg-white"
+                          }`}
+                      >
+                        <div className="mb-1 flex items-center justify-between gap-2 text-xs text-gray-500">
+                          <span className="font-semibold text-gray-700">
+                            {message.user.username}
+                          </span>
+                          <span>
+                            {new Date(message.createdAt).toLocaleTimeString(
+                              language === "fa" ? "fa-IR" : "en-US",
+                              {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              }
+                            )}
+                          </span>
+                        </div>
+
+                        <p className="whitespace-pre-wrap break-words text-sm text-gray-800">
+                          {message.text}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-gray-500">{t.game.chatEmpty}</p>
+              )}
+            </div>
+
+            <div className="mt-3 flex gap-2">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(event) => setChatInput(event.target.value)}
+                onKeyDown={handleChatKeyDown}
+                placeholder={t.game.chatPlaceholder}
+                maxLength={CHAT_MAX_LENGTH}
+                disabled={!currentUser || isChatSubmitting}
+                className="flex-1 rounded-xl border px-3 py-2 text-sm outline-none ring-0 focus:border-blue-500 disabled:bg-gray-100"
+              />
+              <button
+                type="button"
+                onClick={() => void handleSendChatMessage()}
+                disabled={!currentUser || !chatInput.trim() || isChatSubmitting}
+                className="rounded-xl bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50"
+              >
+                {t.game.chatSend}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-6">
             <h3 className="font-semibold">{t.game.pgn}</h3>
             <pre className="mt-2 whitespace-pre-wrap break-words rounded-xl bg-gray-100 p-3 text-xs">
               {game?.pgn ?? t.common.loading}
@@ -1673,9 +1869,8 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
                               setCurrentPly(move.moveNumber);
                             }
                           }}
-                          className={`rounded-lg px-2 py-1 ${
-                            selected ? "bg-black text-white" : "hover:bg-gray-200"
-                          }`}
+                          className={`rounded-lg px-2 py-1 ${selected ? "bg-black text-white" : "hover:bg-gray-200"
+                            }`}
                         >
                           {move.moveNumber}. {move.san} ({move.uci})
                         </button>

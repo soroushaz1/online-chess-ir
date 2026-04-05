@@ -1,15 +1,15 @@
 type DeepWiden<T> =
   T extends string
-    ? string
-    : T extends number
-      ? number
-      : T extends boolean
-        ? boolean
-        : T extends readonly (infer U)[]
-          ? DeepWiden<U>[]
-          : T extends object
-            ? { [K in keyof T]: DeepWiden<T[K]> }
-            : T;
+  ? string
+  : T extends number
+  ? number
+  : T extends boolean
+  ? boolean
+  : T extends readonly (infer U)[]
+  ? DeepWiden<U>[]
+  : T extends object
+  ? { [K in keyof T]: DeepWiden<T[K]> }
+  : T;
 
 export type Language = "fa" | "en";
 
@@ -108,6 +108,13 @@ const rawMessages = {
       claimAvailableIn: "امکان ثبت پیروزی تا",
       failedToClaimDisconnectWin:
         "ثبت پیروزی به دلیل بی‌حرکتی حریف ناموفق بود",
+      chatTitle: "چت بازی",
+      chatPlaceholder: "پیام بنویس...",
+      chatSend: "ارسال",
+      chatEmpty: "هنوز پیامی ارسال نشده.",
+      chatLoginRequired: "برای ارسال پیام باید وارد شوید",
+      chatSendFailed: "ارسال پیام ناموفق بود",
+      chatTooLong: "پیام خیلی طولانی است",
     },
     authPhone: {
       title: "ورود با شماره موبایل",
@@ -268,6 +275,13 @@ const rawMessages = {
       claimDisconnectWin: "Claim win by opponent inactivity",
       claimAvailableIn: "Claim will be available in",
       failedToClaimDisconnectWin: "Failed to claim win by opponent inactivity",
+      chatTitle: "Game Chat",
+      chatPlaceholder: "Type a message...",
+      chatSend: "Send",
+      chatEmpty: "No messages yet.",
+      chatLoginRequired: "You must be logged in to send messages",
+      chatSendFailed: "Failed to send message",
+      chatTooLong: "Message is too long",
     },
     authPhone: {
       title: "Phone login",
