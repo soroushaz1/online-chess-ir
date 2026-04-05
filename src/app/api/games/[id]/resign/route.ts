@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
+import { applyRatingForFinishedGame } from "@/lib/rating";
 import { buildGamePgn } from "@/lib/pgn";
 
 type Params = {
@@ -33,10 +34,10 @@ export async function POST(_request: NextRequest, { params }: Params) {
     where: { id },
     include: {
       whitePlayer: {
-        select: { id: true, username: true },
+        select: { id: true, username: true, rating: true },
       },
       blackPlayer: {
-        select: { id: true, username: true },
+        select: { id: true, username: true, rating: true },
       },
       moves: {
         orderBy: { moveNumber: "asc" },
@@ -108,16 +109,18 @@ export async function POST(_request: NextRequest, { params }: Params) {
     },
     include: {
       whitePlayer: {
-        select: { id: true, username: true },
+        select: { id: true, username: true, rating: true },
       },
       blackPlayer: {
-        select: { id: true, username: true },
+        select: { id: true, username: true, rating: true },
       },
       moves: {
         orderBy: { moveNumber: "asc" },
       },
     },
   });
+
+  const finalGame = await applyRatingForFinishedGame(updatedGame.id);
 
   const io = (globalThis as typeof globalThis & {
     io?: {
@@ -130,12 +133,12 @@ export async function POST(_request: NextRequest, { params }: Params) {
   if (io) {
     io.to(`game:${id}`).emit("game:updated", {
       gameId: id,
-      game: updatedGame,
+      game: finalGame,
     });
   }
 
   return NextResponse.json({
     ok: true,
-    game: updatedGame,
+    game: finalGame,
   });
 }

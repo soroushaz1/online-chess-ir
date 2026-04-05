@@ -52,41 +52,50 @@ model OtpCode {
 }
 
 model Game {
-  id                        String                 @id @default(cuid())
-  whitePlayerId             String?
-  blackPlayerId             String?
-  whiteJoinToken            String?                @unique
-  blackJoinToken            String?                @unique
-  initialFen                String                 @default("start")
-  currentFen                String
-  pgn                       String                 @default("")
-  status                    String                 @default("waiting")
-  result                    String?
-  rated                     Boolean                @default(false)
-  timeControlMs             Int                    @default(600000)
-  incrementSeconds          Int                    @default(0)
-  whiteTimeMs               Int                    @default(600000)
-  blackTimeMs               Int                    @default(600000)
-  turnStartedAt             DateTime?              @default(now())
-  whiteConnected            Boolean                @default(false)
-  blackConnected            Boolean                @default(false)
-  whiteLastSeenAt           DateTime?
-  blackLastSeenAt           DateTime?
-  drawOfferedBySide         String?
-  drawOfferedAt             DateTime?
-  analysisStatus            String                 @default("idle")
-  analysisStartedAt         DateTime?
-  analysisCompletedAt       DateTime?
-  analysisError             String?
-  createdAt                 DateTime               @default(now())
-  updatedAt                 DateTime               @updatedAt
-  finishedAt                DateTime?
+  id                  String    @id @default(cuid())
+  whitePlayerId       String?
+  blackPlayerId       String?
+  whiteJoinToken      String?   @unique
+  blackJoinToken      String?   @unique
+  initialFen          String    @default("start")
+  currentFen          String
+  pgn                 String    @default("")
+  status              String    @default("waiting")
+  result              String?
+  rated               Boolean   @default(false)
 
-  whitePlayer User? @relation("WhitePlayerGames", fields: [whitePlayerId], references: [id])
-  blackPlayer User? @relation("BlackPlayerGames", fields: [blackPlayerId], references: [id])
-  moves       Move[]
-  analysisPositions GameAnalysisPosition[]
-  analysisMoves     GameAnalysisMove[]
+  whiteRatingBefore   Int?
+  blackRatingBefore   Int?
+  whiteRatingAfter    Int?
+  blackRatingAfter    Int?
+  whiteRatingDelta    Int?
+  blackRatingDelta    Int?
+  ratingProcessedAt   DateTime?
+
+  timeControlMs       Int       @default(600000)
+  incrementSeconds    Int       @default(0)
+  whiteTimeMs         Int       @default(600000)
+  blackTimeMs         Int       @default(600000)
+  turnStartedAt       DateTime? @default(now())
+  whiteConnected      Boolean   @default(false)
+  blackConnected      Boolean   @default(false)
+  whiteLastSeenAt     DateTime?
+  blackLastSeenAt     DateTime?
+  drawOfferedBySide   String?
+  drawOfferedAt       DateTime?
+  analysisStatus      String    @default("idle")
+  analysisStartedAt   DateTime?
+  analysisCompletedAt DateTime?
+  analysisError       String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  finishedAt          DateTime?
+
+  whitePlayer         User?     @relation("WhitePlayerGames", fields: [whitePlayerId], references: [id])
+  blackPlayer         User?     @relation("BlackPlayerGames", fields: [blackPlayerId], references: [id])
+  moves               Move[]
+  analysisPositions   GameAnalysisPosition[]
+  analysisMoves       GameAnalysisMove[]
 }
 
 model Move {

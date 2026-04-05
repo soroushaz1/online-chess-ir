@@ -19,7 +19,8 @@ import { messages } from "@/lib/i18n";
 type Player = {
   id: string;
   username: string;
-  phoneNumber: string;
+  phoneNumber?: string;
+  rating?: number;
 };
 
 type Move = {
@@ -40,6 +41,7 @@ type CurrentUser = {
   id: string;
   username: string;
   phoneNumber: string;
+  rating: number;
 };
 
 type Game = {
@@ -49,6 +51,7 @@ type Game = {
   pgn: string;
   status: string;
   result: string | null;
+  rated: boolean;
   whiteTimeMs: number;
   blackTimeMs: number;
   turnStartedAt: string | null;
@@ -64,6 +67,13 @@ type Game = {
   drawOfferedAt: string | null;
   whitePlayer: Player | null;
   blackPlayer: Player | null;
+  whiteRatingBefore: number | null;
+  blackRatingBefore: number | null;
+  whiteRatingAfter: number | null;
+  blackRatingAfter: number | null;
+  whiteRatingDelta: number | null;
+  blackRatingDelta: number | null;
+  ratingProcessedAt?: string | null;
   moves: Move[];
 };
 
@@ -151,6 +161,37 @@ function formatClock(ms: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function formatRatingDelta(delta: number | null | undefined) {
+  if (delta == null) return "";
+  if (delta > 0) return `+${delta}`;
+  return String(delta);
+}
+
+function getDisplayedRating(game: Game | null, side: Side) {
+  if (!game) return null;
+
+  if (side === "white") {
+    return (
+      game.whiteRatingAfter ??
+      game.whitePlayer?.rating ??
+      game.whiteRatingBefore ??
+      null
+    );
+  }
+
+  return (
+    game.blackRatingAfter ??
+    game.blackPlayer?.rating ??
+    game.blackRatingBefore ??
+    null
+  );
+}
+
+function getRatingDelta(game: Game | null, side: Side) {
+  if (!game) return null;
+  return side === "white" ? game.whiteRatingDelta : game.blackRatingDelta;
 }
 
 function getLiveClockMs(game: Game, side: Side) {
@@ -401,6 +442,17 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
 
     return game.moves[effectivePly - 1] ?? null;
   }, [game, isFinishedGame, effectivePly]);
+
+  const whiteDisplayedRating = useMemo(
+    () => getDisplayedRating(game, "white"),
+    [game]
+  );
+  const blackDisplayedRating = useMemo(
+    () => getDisplayedRating(game, "black"),
+    [game]
+  );
+  const whiteRatingDelta = useMemo(() => getRatingDelta(game, "white"), [game]);
+  const blackRatingDelta = useMemo(() => getRatingDelta(game, "black"), [game]);
 
   const clearMoveHighlights = useCallback(() => {
     setSelectedSquare(null);
@@ -1238,6 +1290,12 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
     URL.revokeObjectURL(url);
   }
 
+  const ratingLabel = language === "fa" ? "ریتینگ" : "Rating";
+  const yourRatingLabel = language === "fa" ? "ریتینگ شما" : "Your rating";
+  const gameTypeLabel = language === "fa" ? "نوع بازی" : "Game type";
+  const ratedLabel = language === "fa" ? "رنک‌دار" : "Rated";
+  const casualLabel = language === "fa" ? "دوستانه" : "Casual";
+
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4">
       <div className="rounded-2xl border bg-white p-4 shadow-sm">
@@ -1364,18 +1422,48 @@ export default function OnlineGameBoard({ gameId }: { gameId: string }) {
               <span className="font-semibold">{t.game.loggedInAs}:</span>{" "}
               {currentUser?.username ?? t.common.guest}
             </p>
+
+            <p>
+              <span className="font-semibold">{yourRatingLabel}:</span>{" "}
+              {currentUser?.rating ?? "—"}
+            </p>
+
             <p>
               <span className="font-semibold">{t.game.youAre}:</span>{" "}
               {getSideLabel(playerSide, t.game)}
             </p>
+
+            <p>
+              <span className="font-semibold">{gameTypeLabel}:</span>{" "}
+              {game ? (game.rated ? ratedLabel : casualLabel) : "..."}
+            </p>
+
             <p>
               <span className="font-semibold">{t.game.white}:</span>{" "}
               {game?.whitePlayer?.username ?? t.game.waiting}
             </p>
+
+            <p>
+              <span className="font-semibold">{ratingLabel} {t.game.white}:</span>{" "}
+              {whiteDisplayedRating ?? "—"}
+              {game?.status === "finished" && whiteRatingDelta != null
+                ? ` (${formatRatingDelta(whiteRatingDelta)})`
+                : ""}
+            </p>
+
             <p>
               <span className="font-semibold">{t.game.black}:</span>{" "}
               {game?.blackPlayer?.username ?? t.game.waiting}
             </p>
+
+            <p>
+              <span className="font-semibold">{ratingLabel} {t.game.black}:</span>{" "}
+              {blackDisplayedRating ?? "—"}
+              {game?.status === "finished" && blackRatingDelta != null
+                ? ` (${formatRatingDelta(blackRatingDelta)})`
+                : ""}
+            </p>
+
             <p>
               <span className="font-semibold">{t.game.whiteConnected}:</span>{" "}
               {game ? (game.whiteConnected ? t.common.yes : t.common.no) : "..."}

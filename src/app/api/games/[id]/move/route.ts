@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
+import { applyRatingForFinishedGame } from "@/lib/rating";
 import { buildGamePgn, replayGameFromInitialFen } from "@/lib/pgn";
 
 type Params = {
@@ -51,10 +52,18 @@ export async function POST(request: NextRequest, { params }: Params) {
     where: { id },
     include: {
       whitePlayer: {
-        select: { id: true, username: true },
+        select: {
+          id: true,
+          username: true,
+          rating: true,
+        },
       },
       blackPlayer: {
-        select: { id: true, username: true },
+        select: {
+          id: true,
+          username: true,
+          rating: true,
+        },
       },
       moves: {
         orderBy: { moveNumber: "asc" },
@@ -172,16 +181,26 @@ export async function POST(request: NextRequest, { params }: Params) {
       },
       include: {
         whitePlayer: {
-          select: { id: true, username: true },
+          select: {
+            id: true,
+            username: true,
+            rating: true,
+          },
         },
         blackPlayer: {
-          select: { id: true, username: true },
+          select: {
+            id: true,
+            username: true,
+            rating: true,
+          },
         },
         moves: {
           orderBy: { moveNumber: "asc" },
         },
       },
     });
+
+    const finalGame = await applyRatingForFinishedGame(timedOutGame.id);
 
     const io = (globalThis as typeof globalThis & {
       io?: {
@@ -194,12 +213,12 @@ export async function POST(request: NextRequest, { params }: Params) {
     if (io) {
       io.to(`game:${game.id}`).emit("game:updated", {
         gameId: game.id,
-        game: timedOutGame,
+        game: finalGame,
       });
     }
 
     return NextResponse.json(
-      { ok: false, error: "Time out", game: timedOutGame },
+      { ok: false, error: "Time out", game: finalGame },
       { status: 400 }
     );
   }
@@ -295,16 +314,30 @@ export async function POST(request: NextRequest, { params }: Params) {
     where: { id: game.id },
     include: {
       whitePlayer: {
-        select: { id: true, username: true },
+        select: {
+          id: true,
+          username: true,
+          rating: true,
+        },
       },
       blackPlayer: {
-        select: { id: true, username: true },
+        select: {
+          id: true,
+          username: true,
+          rating: true,
+        },
       },
       moves: {
         orderBy: { moveNumber: "asc" },
       },
     },
   });
+
+  let finalGame = updatedGame;
+
+  if (finalGame?.status === "finished") {
+    finalGame = await applyRatingForFinishedGame(finalGame.id);
+  }
 
   const io = (globalThis as typeof globalThis & {
     io?: {
@@ -314,10 +347,10 @@ export async function POST(request: NextRequest, { params }: Params) {
     };
   }).io;
 
-  if (io && updatedGame) {
+  if (io && finalGame) {
     io.to(`game:${game.id}`).emit("game:updated", {
       gameId: game.id,
-      game: updatedGame,
+      game: finalGame,
     });
   }
 
@@ -329,6 +362,6 @@ export async function POST(request: NextRequest, { params }: Params) {
       fen: chess.fen(),
       pgn: nextPgn,
     },
-    game: updatedGame,
+    game: finalGame,
   });
 }

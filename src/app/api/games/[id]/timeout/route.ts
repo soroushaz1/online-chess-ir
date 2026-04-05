@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
+import { applyRatingForFinishedGame } from "@/lib/rating";
 import { buildGamePgn } from "@/lib/pgn";
 
 type Params = {
@@ -24,10 +25,20 @@ function getPlayerSide(
 
 const gameInclude = {
   whitePlayer: {
-    select: { id: true, username: true },
+    select: {
+      id: true,
+      username: true,
+      phoneNumber: true,
+      rating: true,
+    },
   },
   blackPlayer: {
-    select: { id: true, username: true },
+    select: {
+      id: true,
+      username: true,
+      phoneNumber: true,
+      rating: true,
+    },
   },
   moves: {
     orderBy: { moveNumber: "asc" as const },
@@ -156,10 +167,12 @@ export async function POST(_request: Request, { params }: Params) {
     include: gameInclude,
   });
 
-  emitGameUpdated(game.id, updatedGame);
+  const finalGame = await applyRatingForFinishedGame(updatedGame.id);
+
+  emitGameUpdated(game.id, finalGame);
 
   return NextResponse.json({
     ok: true,
-    game: updatedGame,
+    game: finalGame,
   });
 }

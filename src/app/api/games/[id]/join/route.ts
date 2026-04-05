@@ -19,10 +19,20 @@ function getPlayerSide(
 
 const gameInclude = {
   whitePlayer: {
-    select: { id: true, username: true, phoneNumber: true },
+    select: {
+      id: true,
+      username: true,
+      phoneNumber: true,
+      rating: true,
+    },
   },
   blackPlayer: {
-    select: { id: true, username: true, phoneNumber: true },
+    select: {
+      id: true,
+      username: true,
+      phoneNumber: true,
+      rating: true,
+    },
   },
   moves: {
     orderBy: { moveNumber: "asc" as const },

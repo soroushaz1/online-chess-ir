@@ -12,6 +12,7 @@ export async function GET() {
           username: user.username,
           phoneNumber: user.phoneNumber,
           phoneVerifiedAt: user.phoneVerifiedAt,
+          rating: user.rating,
         }
       : null,
   });

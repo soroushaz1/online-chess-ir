@@ -109,6 +109,12 @@ export async function POST() {
   const blackPlayerId =
     creatorSide === "black" ? user.id : opponentEntry.userId;
 
+  const whiteRatingBefore =
+    creatorSide === "white" ? user.rating : opponentEntry.ratingSnapshot;
+
+  const blackRatingBefore =
+    creatorSide === "black" ? user.rating : opponentEntry.ratingSnapshot;
+
   const game = await prisma.game.create({
     data: {
       whitePlayerId,
@@ -120,6 +126,8 @@ export async function POST() {
       pgn: chess.pgn(),
       status: "waiting",
       rated: true,
+      whiteRatingBefore,
+      blackRatingBefore,
       timeControlMs,
       incrementSeconds,
       whiteTimeMs: timeControlMs,
@@ -130,10 +138,20 @@ export async function POST() {
     },
     include: {
       whitePlayer: {
-        select: { id: true, username: true, phoneNumber: true, rating: true },
+        select: {
+          id: true,
+          username: true,
+          phoneNumber: true,
+          rating: true,
+        },
       },
       blackPlayer: {
-        select: { id: true, username: true, phoneNumber: true, rating: true },
+        select: {
+          id: true,
+          username: true,
+          phoneNumber: true,
+          rating: true,
+        },
       },
       moves: {
         orderBy: { moveNumber: "asc" },

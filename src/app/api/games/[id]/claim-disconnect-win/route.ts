@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
+import { applyRatingForFinishedGame } from "@/lib/rating";
 import { buildGamePgn } from "@/lib/pgn";
 
 type Params = {
@@ -24,6 +25,28 @@ function getPlayerSide(
   if (game.blackPlayerId === userId) return "black";
   return null;
 }
+
+const gameInclude = {
+  whitePlayer: {
+    select: {
+      id: true,
+      username: true,
+      phoneNumber: true,
+      rating: true,
+    },
+  },
+  blackPlayer: {
+    select: {
+      id: true,
+      username: true,
+      phoneNumber: true,
+      rating: true,
+    },
+  },
+  moves: {
+    orderBy: { moveNumber: "asc" as const },
+  },
+};
 
 function emitGameUpdated(id: string, game: unknown) {
   const io = (globalThis as typeof globalThis & {
@@ -55,17 +78,7 @@ export async function POST(_request: Request, { params }: Params) {
 
   const game = await prisma.game.findUnique({
     where: { id },
-    include: {
-      whitePlayer: {
-        select: { id: true, username: true },
-      },
-      blackPlayer: {
-        select: { id: true, username: true },
-      },
-      moves: {
-        orderBy: { moveNumber: "asc" },
-      },
-    },
+    include: gameInclude,
   });
 
   if (!game) {
@@ -164,23 +177,15 @@ export async function POST(_request: Request, { params }: Params) {
       drawOfferedBySide: null,
       drawOfferedAt: null,
     },
-    include: {
-      whitePlayer: {
-        select: { id: true, username: true },
-      },
-      blackPlayer: {
-        select: { id: true, username: true },
-      },
-      moves: {
-        orderBy: { moveNumber: "asc" },
-      },
-    },
+    include: gameInclude,
   });
 
-  emitGameUpdated(id, updatedGame);
+  const finalGame = await applyRatingForFinishedGame(updatedGame.id);
+
+  emitGameUpdated(id, finalGame);
 
   return NextResponse.json({
     ok: true,
-    game: updatedGame,
+    game: finalGame,
   });
 }

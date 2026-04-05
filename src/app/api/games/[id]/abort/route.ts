@@ -27,6 +27,28 @@ function getPlayerSide(
   return null;
 }
 
+const gameInclude = {
+  whitePlayer: {
+    select: {
+      id: true,
+      username: true,
+      phoneNumber: true,
+      rating: true,
+    },
+  },
+  blackPlayer: {
+    select: {
+      id: true,
+      username: true,
+      phoneNumber: true,
+      rating: true,
+    },
+  },
+  moves: {
+    orderBy: { moveNumber: "asc" as const },
+  },
+};
+
 export async function POST(_request: NextRequest, { params }: Params) {
   const { id } = await params;
   const currentUser = await getCurrentUser();
@@ -40,17 +62,7 @@ export async function POST(_request: NextRequest, { params }: Params) {
 
   const game = await prisma.game.findUnique({
     where: { id },
-    include: {
-      whitePlayer: {
-        select: { id: true, username: true },
-      },
-      blackPlayer: {
-        select: { id: true, username: true },
-      },
-      moves: {
-        orderBy: { moveNumber: "asc" },
-      },
-    },
+    include: gameInclude,
   });
 
   if (!game) {
@@ -119,17 +131,7 @@ export async function POST(_request: NextRequest, { params }: Params) {
       drawOfferedBySide: null,
       drawOfferedAt: null,
     },
-    include: {
-      whitePlayer: {
-        select: { id: true, username: true },
-      },
-      blackPlayer: {
-        select: { id: true, username: true },
-      },
-      moves: {
-        orderBy: { moveNumber: "asc" },
-      },
-    },
+    include: gameInclude,
   });
 
   const io = (globalThis as typeof globalThis & {

@@ -15,10 +15,20 @@ export async function GET(_request: NextRequest, { params }: Params) {
     where: { id },
     include: {
       whitePlayer: {
-        select: { id: true, username: true },
+        select: {
+          id: true,
+          username: true,
+          phoneNumber: true,
+          rating: true,
+        },
       },
       blackPlayer: {
-        select: { id: true, username: true },
+        select: {
+          id: true,
+          username: true,
+          phoneNumber: true,
+          rating: true,
+        },
       },
       moves: {
         orderBy: { moveNumber: "asc" },
