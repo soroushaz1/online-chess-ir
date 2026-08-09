@@ -10,8 +10,11 @@ datasource db {
 model User {
   id              String    @id @default(cuid())
   username        String    @unique
-  phoneNumber     String    @unique
+  phoneNumber     String?   @unique
   phoneVerifiedAt DateTime?
+  googleId        String?   @unique
+  name            String?
+  avatarUrl       String?
   email           String?   @unique
   passwordHash    String?
   rating          Int       @default(1200)
@@ -35,20 +38,6 @@ model Session {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-  @@index([expiresAt])
-}
-
-model OtpCode {
-  id           String   @id @default(cuid())
-  phoneNumber  String
-  username     String?
-  codeHash     String
-  expiresAt    DateTime
-  consumedAt   DateTime?
-  attemptCount Int      @default(0)
-  createdAt    DateTime @default(now())
-
-  @@index([phoneNumber])
   @@index([expiresAt])
 }
 
@@ -148,14 +137,14 @@ model GameAnalysisPosition {
 }
 
 model GameAnalysisMove {
-  id            String   @id @default(cuid())
-  gameId        String
-  moveId        String   @unique
-  moveNumber    Int
+  id             String   @id @default(cuid())
+  gameId         String
+  moveId         String   @unique
+  moveNumber     Int
   classification String?
-  evalLossCp    Int?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  evalLossCp     Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
   move Move @relation(fields: [moveId], references: [id], onDelete: Cascade)
