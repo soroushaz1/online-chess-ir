@@ -10,8 +10,9 @@ export async function GET() {
       ? {
           id: user.id,
           username: user.username,
-          phoneNumber: user.phoneNumber,
-          phoneVerifiedAt: user.phoneVerifiedAt,
+          email: user.email,
+          name: user.name,
+          avatarUrl: user.avatarUrl,
           rating: user.rating,
         }
       : null,
