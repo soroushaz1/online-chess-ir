@@ -7,7 +7,9 @@ import { useI18n } from "@/components/LanguageProvider";
 type CurrentUser = {
   id: string;
   username: string;
-  phoneNumber: string;
+  email: string | null;
+  name: string | null;
+  avatarUrl: string | null;
   rating: number;
 };
 
@@ -221,6 +223,9 @@ export default function HomePage() {
   const assignedSideLabel =
     gameInfo?.creatorSide === "white" ? t.home.white : t.home.black;
 
+  const googleSignInLabel =
+    language === "fa" ? "ورود با Google" : "Sign in with Google";
+
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-5xl items-start justify-center p-4 pt-24">
       <div className="w-full max-w-2xl rounded-2xl border bg-white p-6 shadow-sm">
@@ -288,12 +293,12 @@ export default function HomePage() {
             </>
           ) : (
             <div className={language === "fa" ? "text-right" : "text-left"}>
-              <Link
-                href="/auth/phone"
+              <a
+                href="/api/auth/google"
                 className="inline-flex rounded-xl bg-black px-5 py-3 text-white"
               >
-                {t.home.signInWithPhone}
-              </Link>
+                {googleSignInLabel}
+              </a>
             </div>
           )}
 
