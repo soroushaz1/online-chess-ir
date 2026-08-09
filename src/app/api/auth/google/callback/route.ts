@@ -54,6 +54,12 @@ async function uniqueUsername(email: string, name?: string) {
   return candidate;
 }
 
+function getPublicHomeUrl() {
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI;
+  if (!redirectUri) return null;
+  return new URL("/", redirectUri);
+}
+
 function clearOAuthCookies(response: NextResponse) {
   response.cookies.set(OAUTH_STATE_COOKIE, "", {
     httpOnly: true,
@@ -71,8 +77,18 @@ function clearOAuthCookies(response: NextResponse) {
   });
 }
 
-function failure(request: NextRequest) {
-  const response = NextResponse.redirect(new URL("/?auth=failed", request.url));
+function failure() {
+  const homeUrl = getPublicHomeUrl();
+
+  if (!homeUrl) {
+    return NextResponse.json(
+      { ok: false, error: "Google OAuth is not configured" },
+      { status: 500 }
+    );
+  }
+
+  homeUrl.searchParams.set("auth", "failed");
+  const response = NextResponse.redirect(homeUrl);
   clearOAuthCookies(response);
   return response;
 }
@@ -95,7 +111,7 @@ export async function GET(request: NextRequest) {
     !verifier ||
     !safeEqual(returnedState, storedState)
   ) {
-    return failure(request);
+    return failure();
   }
 
   const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -103,7 +119,7 @@ export async function GET(request: NextRequest) {
   const redirectUri = process.env.GOOGLE_REDIRECT_URI;
 
   if (!clientId || !clientSecret || !redirectUri) {
-    return failure(request);
+    return failure();
   }
 
   try {
@@ -127,7 +143,7 @@ export async function GET(request: NextRequest) {
 
     if (!tokenResponse.ok || !tokenData.access_token) {
       console.error("Google token exchange failed", tokenData.error);
-      return failure(request);
+      return failure();
     }
 
     const userInfoResponse = await fetch(
@@ -149,7 +165,7 @@ export async function GET(request: NextRequest) {
       profile.email_verified !== true
     ) {
       console.error("Google user info validation failed");
-      return failure(request);
+      return failure();
     }
 
     const email = profile.email.toLowerCase();
@@ -186,11 +202,11 @@ export async function GET(request: NextRequest) {
 
     await createSession(user.id);
 
-    const response = NextResponse.redirect(new URL("/", request.url));
+    const response = NextResponse.redirect(new URL("/", redirectUri));
     clearOAuthCookies(response);
     return response;
   } catch (error) {
     console.error("Google OAuth callback failed", error);
-    return failure(request);
+    return failure();
   }
 }
