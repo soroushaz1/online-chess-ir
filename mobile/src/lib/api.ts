@@ -1,4 +1,9 @@
 import { API_BASE_URL } from "./config";
+import {
+  clearMobileSessionToken,
+  getMobileSessionToken,
+  setMobileSessionToken,
+} from "./session";
 
 export type CurrentUser = {
   id: string;
@@ -14,6 +19,18 @@ type MeResponse = {
   user: CurrentUser | null;
 };
 
+type ExchangeResponse =
+  | {
+      ok: true;
+      sessionToken: string;
+      expiresAt: string;
+      user: CurrentUser;
+    }
+  | {
+      ok: false;
+      error?: string;
+    };
+
 export type ServerCheckResult = {
   connected: boolean;
   authenticated: boolean;
@@ -21,16 +38,62 @@ export type ServerCheckResult = {
   message: string;
 };
 
+async function fetchWithMobileSession(
+  path: string,
+  init: RequestInit = {}
+): Promise<Response> {
+  const token = await getMobileSessionToken();
+  const requestHeaders = new Headers(init.headers);
+
+  if (!requestHeaders.has("Accept")) {
+    requestHeaders.set("Accept", "application/json");
+  }
+
+  if (token) {
+    requestHeaders.set("Authorization", `Bearer ${token}`);
+  }
+
+  return fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers: requestHeaders,
+  });
+}
+
+export async function getCurrentUser(): Promise<CurrentUser | null> {
+  const response = await fetchWithMobileSession("/api/auth/me", {
+    method: "GET",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Server returned HTTP ${response.status}`);
+  }
+
+  const data = (await response.json()) as MeResponse;
+
+  if (!data.ok) {
+    throw new Error("Unexpected API response");
+  }
+
+  return data.user;
+}
+
 export async function checkServer(): Promise<ServerCheckResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
+  const existingToken = await getMobileSessionToken();
 
   try {
+    const tokenHeaders: Record<string, string> = {
+      Accept: "application/json",
+    };
+
+    if (existingToken) {
+      tokenHeaders.Authorization = `Bearer ${existingToken}`;
+    }
+
     const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
       method: "GET",
-      headers: {
-        Accept: "application/json",
-      },
+      headers: tokenHeaders,
       signal: controller.signal,
     });
 
@@ -52,6 +115,10 @@ export async function checkServer(): Promise<ServerCheckResult> {
         user: null,
         message: "Unexpected API response",
       };
+    }
+
+    if (existingToken && !data.user) {
+      await clearMobileSessionToken();
     }
 
     return {
@@ -76,5 +143,51 @@ export async function checkServer(): Promise<ServerCheckResult> {
     };
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+export async function exchangeMobileAuthCode(code: string) {
+  const response = await fetch(`${API_BASE_URL}/api/mobile/auth/exchange`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ code }),
+  });
+
+  const data = (await response.json()) as ExchangeResponse;
+
+  if (!response.ok || !data.ok) {
+    throw new Error(
+      "error" in data && data.error
+        ? data.error
+        : `Session exchange failed (${response.status})`
+    );
+  }
+
+  await setMobileSessionToken(data.sessionToken);
+
+  return {
+    user: data.user,
+    expiresAt: data.expiresAt,
+  };
+}
+
+export async function logoutMobile() {
+  const token = await getMobileSessionToken();
+
+  try {
+    if (token) {
+      await fetch(`${API_BASE_URL}/api/mobile/auth/logout`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+    }
+  } finally {
+    await clearMobileSessionToken();
   }
 }
